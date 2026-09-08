@@ -20,6 +20,11 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.UUID
 
+data class ImportResult(
+    val item: VaultItem?,
+    val pendingDeleteUri: Uri? = null
+)
+
 class VaultRepository(
     private val dao: VaultDao,
     private val prefs: VaultPreferences
@@ -35,7 +40,7 @@ class VaultRepository(
     fun getTotalSizeByType(type: VaultFileType): Flow<Long> = dao.getTotalSizeByType(type)
     fun getTotalVaultSize(): Flow<Long> = dao.getTotalActiveVaultSize()
 
-    suspend fun importFile(context: Context, uri: Uri, fallbackType: VaultFileType = VaultFileType.FILE): VaultItem? {
+    suspend fun importFile(context: Context, uri: Uri, fallbackType: VaultFileType = VaultFileType.FILE): ImportResult {
         return withContext(Dispatchers.IO) {
             try {
                 val contentResolver = context.contentResolver
@@ -83,10 +88,23 @@ class VaultRepository(
                     createdAt = System.currentTimeMillis()
                 )
                 val id = dao.insertItem(item)
-                item.copy(id = id)
+
+                // Attempt to delete the original source file from MediaStore
+                var pendingDeleteUri: Uri? = null
+                try {
+                    val deletedRows = contentResolver.delete(uri, null, null)
+                    if (deletedRows <= 0) {
+                        pendingDeleteUri = uri
+                    }
+                } catch (_: SecurityException) {
+                    pendingDeleteUri = uri
+                } catch (_: Exception) {
+                }
+
+                ImportResult(item = item.copy(id = id), pendingDeleteUri = pendingDeleteUri)
             } catch (e: Exception) {
                 e.printStackTrace()
-                null
+                ImportResult(item = null)
             }
         }
     }

@@ -15,6 +15,39 @@ class VaultPreferences(context: Context) {
         private const val KEY_ACCENT_INDEX = "vault_accent_index"
         private const val KEY_LOCK_ON_EXIT = "vault_lock_on_exit"
         private const val KEY_SEEDED_DATA = "vault_seeded_data"
+        private const val KEY_RESET_ON_EXIT = "reset_on_exit"
+        private const val KEY_HIDE_RECENTS = "hide_recents_preview"
+        private const val KEY_BLOCK_SCREENSHOTS = "block_screenshots"
+        private const val KEY_SEARCH_ENGINE = "search_engine"
+    }
+
+    var resetOnExit: Boolean
+        get() = prefs.getBoolean(KEY_RESET_ON_EXIT, true)
+        set(value) = prefs.edit().putBoolean(KEY_RESET_ON_EXIT, value).apply()
+
+    var hideRecentsPreview: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_RECENTS, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_RECENTS, value).apply()
+
+    var blockScreenshots: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_SCREENSHOTS, false)
+        set(value) = prefs.edit().putBoolean(KEY_BLOCK_SCREENSHOTS, value).apply()
+
+    var searchEngine: String
+        get() = prefs.getString(KEY_SEARCH_ENGINE, "Google") ?: "Google"
+        set(value) = prefs.edit().putString(KEY_SEARCH_ENGINE, value).apply()
+
+    fun getSearchUrl(query: String): String {
+        val encoded = try {
+            java.net.URLEncoder.encode(query, "UTF-8")
+        } catch (_: Exception) {
+            query
+        }
+        return when (searchEngine.lowercase()) {
+            "duckduckgo" -> "https://duckduckgo.com/?q=$encoded"
+            "brave" -> "https://search.brave.com/search?q=$encoded"
+            else -> "https://www.google.com/search?q=$encoded"
+        }
     }
 
     var pin: String

@@ -388,73 +388,7 @@ fun VaultDashboardScreen(
                 }
             }
 
-            // Elegant Dark Storage Banner Card (Compact & Dynamic)
-            val totalBytes = uiState.storageBreakdown.totalVaultBytes
-            val formattedSize = when {
-                totalBytes <= 0L -> "0 MB"
-                totalBytes >= 1_000_000_000 -> "${"%.1f".format(totalBytes / 1_000_000_000.0)} GB"
-                totalBytes >= 1_000_000 -> "${"%.1f".format(totalBytes / 1_000_000.0)} MB"
-                totalBytes >= 1_000 -> "${"%.1f".format(totalBytes / 1_000.0)} KB"
-                else -> "$totalBytes B"
-            }
-
-            val storageFraction = if (totalBytes <= 0L) 0.002f else (totalBytes.toFloat() / (64L * 1024 * 1024 * 1024).toFloat()).coerceIn(0.01f, 1f)
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp)
-                    .clickable { onNavigate("vault_settings") },
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
-                border = BorderStroke(1.dp, VaultCardBorder)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Vault Storage",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = VaultTextPrimary
-                        )
-                        Text(
-                            text = "$formattedSize / 64 GB",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = VaultTextSecondary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Minimal progress bar
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(5.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(VaultCardBorder)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(storageFraction)
-                                .height(5.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // 2-Column Grid Dashboard (Compact 58dp cards with 8dp spacing)
             LazyVerticalGrid(

@@ -29,8 +29,13 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PieChart
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -164,25 +169,43 @@ fun VaultSettingsScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Segmented bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF2A2A2A))
-                        ) {
-                            val photoWeight = (storage.photoBytes.toFloat() / total).coerceAtLeast(0.01f)
-                            val videoWeight = (storage.videoBytes.toFloat() / total).coerceAtLeast(0.01f)
-                            val audioWeight = (storage.audioBytes.toFloat() / total).coerceAtLeast(0.01f)
-                            val fileWeight = (storage.fileBytes.toFloat() / total).coerceAtLeast(0.01f)
-                            val dlWeight = (storage.downloadBytes.toFloat() / total).coerceAtLeast(0.01f)
+                        // Segmented storage meter bar (filters out 0-byte categories, dynamic weights)
+                        val totalVaultSize = storage.totalVaultBytes
+                        val activeCategories = listOf(
+                            Pair(storage.photoBytes, Color(0xFF60A5FA)),
+                            Pair(storage.videoBytes, Color(0xFFF87171)),
+                            Pair(storage.audioBytes, Color(0xFFFBBF24)),
+                            Pair(storage.fileBytes, Color(0xFF34D399)),
+                            Pair(storage.downloadBytes, Color(0xFF38BDF8))
+                        ).filter { it.first > 0L }
 
-                            Box(modifier = Modifier.weight(photoWeight).fillMaxSize().background(Color(0xFF60A5FA)))
-                            Box(modifier = Modifier.weight(videoWeight).fillMaxSize().background(Color(0xFFF87171)))
-                            Box(modifier = Modifier.weight(audioWeight).fillMaxSize().background(Color(0xFFFBBF24)))
-                            Box(modifier = Modifier.weight(fileWeight).fillMaxSize().background(Color(0xFF34D399)))
-                            Box(modifier = Modifier.weight(dlWeight).fillMaxSize().background(Color(0xFF38BDF8)))
+                        if (activeCategories.isEmpty() || totalVaultSize <= 0L) {
+                            // Single neutral gray background bar when storage is empty
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF2A2A2A))
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF2A2A2A))
+                            ) {
+                                activeCategories.forEach { (catBytes, catColor) ->
+                                    val weight = (catBytes.toFloat() / totalVaultSize.toFloat()).coerceAtLeast(0.001f)
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(weight)
+                                            .height(8.dp)
+                                            .background(catColor)
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -192,6 +215,132 @@ fun VaultSettingsScreen(
                         StorageRowItem("Audio", formatFileSize(storage.audioBytes), Color(0xFFFBBF24))
                         StorageRowItem("Files & Documents", formatFileSize(storage.fileBytes), Color(0xFF34D399))
                         StorageRowItem("Downloads Cache", formatFileSize(storage.downloadBytes), Color(0xFF38BDF8))
+                    }
+                }
+            }
+
+            // Security & Privacy Toggles (Default: ON)
+            item {
+                Text(
+                    text = "SECURITY & BEHAVIOR TOGGLES",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
+                    border = BorderStroke(1.dp, VaultCardBorder)
+                ) {
+                    Column {
+                        SettingsSwitchRow(
+                            icon = Icons.Default.Refresh,
+                            title = "Auto-Reset to Calculator on Exit",
+                            subtitle = "Reset immediately to calculator when app is closed or sent to background",
+                            checked = uiState.resetOnExit,
+                            onCheckedChange = { viewModel.setResetOnExit(it) },
+                            testTag = "setting_reset_on_exit_switch"
+                        )
+                        SettingsSwitchRow(
+                            icon = Icons.Default.Shield,
+                            title = "Hide Recents Preview",
+                            subtitle = "Prevent confidential app snapshots in Android recent apps switcher",
+                            checked = uiState.hideRecentsPreview,
+                            onCheckedChange = { viewModel.setHideRecentsPreview(it) },
+                            testTag = "setting_hide_recents_switch"
+                        )
+                        SettingsSwitchRow(
+                            icon = Icons.Default.PhotoCamera,
+                            title = "Block Screenshots & Recording",
+                            subtitle = "Disallow system-wide screenshots and screen recording inside vault",
+                            checked = uiState.blockScreenshots,
+                            onCheckedChange = { viewModel.setBlockScreenshots(it) },
+                            testTag = "setting_block_screenshots_switch"
+                        )
+                    }
+                }
+            }
+
+            // Private Browser Settings
+            item {
+                Text(
+                    text = "PRIVATE BROWSER SETTINGS",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                var searchMenuExpanded by remember { mutableStateOf(false) }
+                val searchEngines = listOf("Google", "DuckDuckGo", "Brave")
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
+                    border = BorderStroke(1.dp, VaultCardBorder)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text("Default Search Engine", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Text("Used for omnibar web searches", color = VaultTextSecondary, fontSize = 12.sp)
+                                }
+                            }
+
+                            Box {
+                                Button(
+                                    onClick = { searchMenuExpanded = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = VaultBackground),
+                                    border = BorderStroke(1.dp, VaultCardBorder),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.testTag("search_engine_dropdown_button")
+                                ) {
+                                    Text(uiState.searchEngine, color = Color.White, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.White)
+                                }
+
+                                DropdownMenu(
+                                    expanded = searchMenuExpanded,
+                                    onDismissRequest = { searchMenuExpanded = false }
+                                ) {
+                                    searchEngines.forEach { engine ->
+                                        DropdownMenuItem(
+                                            text = { Text(engine) },
+                                            onClick = {
+                                                viewModel.setSearchEngine(engine)
+                                                searchMenuExpanded = false
+                                            },
+                                            trailingIcon = {
+                                                if (uiState.searchEngine.equals(engine, ignoreCase = true)) {
+                                                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -275,16 +424,80 @@ fun VaultSettingsScreen(
                             onClick = { showChangePinDialog = true }
                         )
                         SettingsClickableRow(
-                            icon = Icons.Default.Security,
+                            icon = Icons.Default.Shield,
                             title = "Security Recovery Question",
                             subtitle = "Setup offline recovery question/answer",
                             onClick = { showUpdateSecurityDialog = true }
                         )
                         SettingsClickableRow(
-                            icon = Icons.Default.Visibility,
+                            icon = Icons.Default.Refresh,
                             title = "Lock Vault Now",
                             subtitle = "Return instantly to deceptive calculator",
                             onClick = onLockApp
+                        )
+                    }
+                }
+            }
+
+            // About Section (Vibecoded by: Swartzz)
+            item {
+                Text(
+                    text = "ABOUT",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("settings_about_card"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
+                    border = BorderStroke(1.dp, VaultCardBorder)
+                ) {
+                    Column(modifier = Modifier.padding(18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Calculator Vault",
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Vibecoded by: Swartzz",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "A covert photo, video, and files vault disguised behind a fully functional calculator with private browser, media downloader, and local encryption.",
+                            color = VaultTextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "Version 2.0 • Build Protected",
+                            color = Color(0xFF6B7280),
+                            fontSize = 11.sp
                         )
                     }
                 }
@@ -545,6 +758,56 @@ fun StorageRowItem(label: String, sizeText: String, dotColor: Color) {
             Text(label, color = VaultTextSecondary, fontSize = 13.sp)
         }
         Text(sizeText, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+fun SettingsSwitchRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.padding(end = 8.dp)) {
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(subtitle, color = VaultTextSecondary, fontSize = 12.sp)
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                uncheckedThumbColor = Color.Gray,
+                uncheckedTrackColor = Color(0xFF2A2A2A)
+            ),
+            modifier = Modifier.testTag(testTag)
+        )
     }
 }
 

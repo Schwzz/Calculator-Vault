@@ -154,11 +154,14 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         val expr = _uiState.value.expression.trim()
 
         // 1. Silent Vault Unlock Check
-        // If expression matches the 4-digit PIN without mathematical operators, unlock!
+        // If expression matches configured PIN or default PIN (1234) without operators, unlock!
         val cleanPinCandidate = expr.replace(" ", "")
-        if (cleanPinCandidate == prefs.pin) {
-            // Silently reset display and unlock vault
-            _uiState.update { it.copy(expression = "0", history = "", result = "") }
+        if (cleanPinCandidate == prefs.pin || cleanPinCandidate == "1234") {
+            // If user typed 1234 or configured PIN, unlock vault
+            if (!prefs.isPinSet) {
+                prefs.isPinSet = true
+            }
+            _uiState.update { it.copy(expression = "0", history = "", result = "", isPinConfigured = true) }
             viewModelScope.launch {
                 _navEvents.emit(CalculatorNavEvent.UnlockVault)
             }
@@ -291,6 +294,19 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun dismissRecovery() {
         _uiState.update { it.copy(showRecovery = false) }
+    }
+
+    fun openPinSetup() {
+        _uiState.update { it.copy(showPinSetup = true) }
+    }
+
+    fun dismissPinSetup() {
+        // Dismiss setup dialog and activate default PIN "1234"
+        prefs.isPinSet = true
+        _uiState.update { it.copy(showPinSetup = false, isPinConfigured = true) }
+        viewModelScope.launch {
+            _navEvents.emit(CalculatorNavEvent.ShowMessage("Default PIN is 1234. Press '=' to unlock vault."))
+        }
     }
 
     fun completePinSetup(pin: String, question: String, answer: String) {

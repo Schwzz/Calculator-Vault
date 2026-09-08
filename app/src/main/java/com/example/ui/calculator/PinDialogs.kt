@@ -52,6 +52,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
+import com.example.ui.theme.VaultTextSecondary
 
 val PRESET_QUESTIONS = listOf(
     "What is your favorite city?",
@@ -74,8 +75,8 @@ fun PinSetupDialog(
     var showQuestionDropdown by remember { mutableStateOf(false) }
 
     Dialog(
-        onDismissRequest = { /* force setup on first launch */ },
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
     ) {
         Surface(
             modifier = Modifier
@@ -281,6 +282,15 @@ fun PinSetupDialog(
                     )
                 ) {
                     Text("Save & Disguise", fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().testTag("skip_pin_button")
+                ) {
+                    Text("Use Default PIN (1234)", color = VaultTextSecondary)
                 }
             }
         }

@@ -143,6 +143,24 @@ fun VaultFilesScreen(
         }
     }
 
+    val deleteIntentSenderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) {
+        // System deletion intent completed
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.pendingDeleteIntentSender.collect { intentSenderRequest ->
+            deleteIntentSenderLauncher.launch(intentSenderRequest)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.userMessage.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
+
     var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
     var selectedFileDetails by remember { mutableStateOf<VaultItem?>(null) }
 

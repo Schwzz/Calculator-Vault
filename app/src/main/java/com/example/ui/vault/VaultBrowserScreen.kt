@@ -2,6 +2,8 @@ package com.example.ui.vault
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.view.View
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -89,11 +91,25 @@ import com.example.ui.theme.VaultCardBorder
 import com.example.ui.theme.VaultTextPrimary
 import com.example.ui.theme.VaultTextSecondary
 
-data class BrowserTab(
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+class BrowserTab(
     val id: String = java.util.UUID.randomUUID().toString(),
-    var title: String = "New Tab",
-    var url: String = ""
-)
+    initialTitle: String = "New Tab",
+    initialUrl: String = "",
+    initialFavicon: Bitmap? = null
+) {
+    var title by mutableStateOf(initialTitle)
+    var url by mutableStateOf(initialUrl)
+    var favicon by mutableStateOf<Bitmap?>(initialFavicon)
+}
 
 data class ResolutionOption(
     val label: String,
@@ -118,13 +134,17 @@ fun VaultBrowserScreen(
     onNavigateBack: () -> Unit,
     onOpenDownloads: () -> Unit
 ) {
+    val vaultUiState by viewModel.uiState.collectAsStateWithLifecycle()
     val tabs = remember { mutableStateListOf(BrowserTab()) }
     var activeTabIndex by remember { mutableIntStateOf(0) }
     var showTabSwitcher by remember { mutableStateOf(false) }
 
-    val currentTab = tabs.getOrNull(activeTabIndex) ?: tabs.first()
+    val activeTab = tabs.getOrNull(activeTabIndex) ?: tabs.first()
+    val currentTab = activeTab
 
-    var inputUrl by remember { mutableStateOf(currentTab.url) }
+    var inputUrl by remember { mutableStateOf(activeTab.url) }
+    var isInputFocused by remember { mutableStateOf(false) }
+    var currentFavicon by remember { mutableStateOf<Bitmap?>(activeTab.favicon) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
@@ -134,6 +154,20 @@ fun VaultBrowserScreen(
     var showResolutionPicker by remember { mutableStateOf(false) }
 
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Dynamic WebView Loading: Trigger loadUrl inside LaunchedEffect(activeTab.url)
+    LaunchedEffect(activeTab.url) {
+        val wv = webViewInstance
+        if (wv != null && activeTab.url.isNotEmpty() && wv.url != activeTab.url) {
+            wv.loadUrl(activeTab.url)
+        }
+    }
+
+    LaunchedEffect(activeTabIndex) {
+        inputUrl = activeTab.url
+        currentFavicon = activeTab.favicon
+    }
 
     BackHandler {
         if (showResolutionPicker) {
@@ -142,9 +176,10 @@ fun VaultBrowserScreen(
             showTabSwitcher = false
         } else if (webViewInstance?.canGoBack() == true) {
             webViewInstance?.goBack()
-        } else if (currentTab.url.isNotEmpty()) {
-            currentTab.url = ""
+        } else if (activeTab.url.isNotEmpty()) {
+            activeTab.url = ""
             inputUrl = ""
+            currentFavicon = null
             detectedVideoUrl = null
         } else {
             onNavigateBack()
@@ -155,17 +190,28 @@ fun VaultBrowserScreen(
         val trimmed = urlOrQuery.trim()
         if (trimmed.isEmpty()) return
 
+        val searchPrefix = when (vaultUiState.searchEngine.lowercase()) {
+            "duckduckgo" -> "https://duckduckgo.com/?q="
+            "brave" -> "https://search.brave.com/search?q="
+            else -> "https://www.google.com/search?q="
+        }
+
         val targetUrl = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
             trimmed
         } else if (trimmed.contains(".") && !trimmed.contains(" ")) {
             "https://$trimmed"
         } else {
-            "https://www.google.com/search?q=${java.net.URLEncoder.encode(trimmed, "UTF-8")}"
+            "$searchPrefix${java.net.URLEncoder.encode(trimmed, "UTF-8")}"
         }
-        currentTab.url = targetUrl
+        activeTab.url = targetUrl
         inputUrl = targetUrl
-        webViewInstance?.loadUrl(targetUrl)
+        keyboardController?.hide()
         focusManager.clearFocus()
+        webViewInstance?.let { wv ->
+            if (wv.url != targetUrl) {
+                wv.loadUrl(targetUrl)
+            }
+        }
     }
 
     Scaffold(
@@ -195,49 +241,99 @@ fun VaultBrowserScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Vault", tint = Color.White)
                         }
 
-                        // Search & URL Input Field
-                        OutlinedTextField(
+                        // Search & URL Input Field - Decoupled state, IME Search, Favicon support, No text cutoff
+                        BasicTextField(
                             value = inputUrl,
                             onValueChange = { inputUrl = it },
-                            placeholder = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        Icons.Default.Search,
-                                        contentDescription = null,
-                                        tint = VaultTextSecondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Search or enter web address", color = VaultTextSecondary, fontSize = 13.sp)
-                                }
-                            },
                             singleLine = true,
-                            shape = RoundedCornerShape(24.dp),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                            keyboardActions = KeyboardActions(onGo = { navigateTo(inputUrl) }),
-                            trailingIcon = {
-                                if (inputUrl.isNotEmpty()) {
-                                    IconButton(onClick = {
-                                        inputUrl = ""
-                                        currentTab.url = ""
-                                        detectedVideoUrl = null
-                                    }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = VaultTextSecondary, modifier = Modifier.size(18.dp))
-                                    }
+                            maxLines = 1,
+                            textStyle = TextStyle(color = Color.White, fontSize = 13.5.sp),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    navigateTo(inputUrl)
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                },
+                                onGo = {
+                                    navigateTo(inputUrl)
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
                                 }
-                            },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = VaultCardBorder,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedContainerColor = VaultBackground,
-                                unfocusedContainerColor = VaultBackground
                             ),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp)
-                                .testTag("browser_search_input")
+                                .onFocusChanged { isInputFocused = it.isFocused }
+                                .testTag("browser_search_input"),
+                            decorationBox = { innerTextField ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .background(VaultBackground)
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultCardBorder,
+                                            shape = RoundedCornerShape(22.dp)
+                                        )
+                                        .padding(horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val fav = currentFavicon
+                                    if (fav != null && !isInputFocused && currentTab.url.isNotEmpty()) {
+                                        Image(
+                                            bitmap = fav.asImageBitmap(),
+                                            contentDescription = "Favicon",
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .clip(CircleShape)
+                                                .testTag("browser_favicon")
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultTextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
+
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (inputUrl.isEmpty()) {
+                                            Text(
+                                                text = "Search (${vaultUiState.searchEngine}) or enter address",
+                                                color = VaultTextSecondary,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+
+                                    if (inputUrl.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = {
+                                                inputUrl = ""
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Clear",
+                                                tint = VaultTextSecondary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         )
 
                         Spacer(modifier = Modifier.width(6.dp))
@@ -340,11 +436,133 @@ fun VaultBrowserScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (currentTab.url.isEmpty()) {
-                // Minimal, elegant private browser start page
+            // Live WebView - Always kept in layout with Modifier.fillMaxSize()
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        // Use software layer type to avoid Mesa DRM rendernode (/dev/dri/renderD128) access failures in virtualized environments
+                        setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            databaseEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0"
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                        }
+
+                        webViewClient = object : WebViewClient() {
+                            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                                // Gracefully handle render process termination without crashing
+                                return true
+                            }
+
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                if (!isInputFocused) {
+                                    inputUrl = url ?: ""
+                                }
+                                activeTab.url = url ?: ""
+                                if (favicon != null) {
+                                    currentFavicon = favicon
+                                    activeTab.favicon = favicon
+                                }
+                                pageProgress = 0.2f
+                                canGoBack = view?.canGoBack() ?: false
+                                canGoForward = view?.canGoForward() ?: false
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                pageProgress = 1f
+                                canGoBack = view?.canGoBack() ?: false
+                                canGoForward = view?.canGoForward() ?: false
+                                activeTab.title = view?.title ?: "Page"
+                                if (!isInputFocused) {
+                                    inputUrl = url ?: ""
+                                }
+
+                                // Automatic video detection script
+                                val checkVideoJs = """
+                                    (function() {
+                                        var v = document.querySelector('video');
+                                        if (v && v.src) return v.src;
+                                        var sources = document.querySelectorAll('video source');
+                                        for (var i=0; i<sources.length; i++) {
+                                            if (sources[i].src) return sources[i].src;
+                                        }
+                                        return '';
+                                    })();
+                                """.trimIndent()
+                                view?.evaluateJavascript(checkVideoJs) { result ->
+                                    val clean = result?.replace("\"", "")?.trim()
+                                    if (!clean.isNullOrEmpty() && clean != "null") {
+                                        detectedVideoUrl = clean
+                                        detectedVideoTitle = view?.title ?: "Web Video"
+                                    }
+                                }
+
+                                if (url?.contains("youtube.com") == true || url?.contains("vimeo") == true || url?.contains(".mp4") == true) {
+                                    detectedVideoUrl = url
+                                    detectedVideoTitle = view?.title ?: "Streaming Video"
+                                }
+                            }
+
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: WebResourceRequest?
+                            ): WebResourceResponse? {
+                                val reqUrl = request?.url?.toString() ?: ""
+                                if (reqUrl.endsWith(".mp4", true) || reqUrl.contains(".mp4?") || reqUrl.contains("videoplayback")) {
+                                    detectedVideoUrl = reqUrl
+                                }
+                                return super.shouldInterceptRequest(view, request)
+                            }
+                        }
+
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                pageProgress = newProgress / 100f
+                                super.onProgressChanged(view, newProgress)
+                            }
+
+                            override fun onReceivedTitle(view: WebView?, title: String?) {
+                                super.onReceivedTitle(view, title)
+                                if (!title.isNullOrEmpty()) {
+                                    activeTab.title = title
+                                }
+                            }
+
+                            override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
+                                super.onReceivedIcon(view, icon)
+                                if (icon != null) {
+                                    currentFavicon = icon
+                                    activeTab.favicon = icon
+                                }
+                            }
+                        }
+
+                        if (activeTab.url.isNotEmpty()) {
+                            loadUrl(activeTab.url)
+                        }
+                    }
+                },
+                update = { wv ->
+                    webViewInstance = wv
+                    if (activeTab.url.isNotEmpty() && wv.url != activeTab.url) {
+                        wv.loadUrl(activeTab.url)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Minimal, elegant private browser start page (displayed when active tab URL is empty)
+            if (activeTab.url.isEmpty()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .background(VaultBackground)
                         .padding(horizontal = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
@@ -415,127 +633,33 @@ fun VaultBrowserScreen(
                         }
                     }
                 }
-            } else {
-                // Live WebView
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                databaseEnabled = true
-                                mediaPlaybackRequiresUserGesture = false
-                                userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0"
-                                cacheMode = WebSettings.LOAD_DEFAULT
-                            }
+            }
 
-                            webViewClient = object : WebViewClient() {
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    super.onPageStarted(view, url, favicon)
-                                    inputUrl = url ?: ""
-                                    currentTab.url = url ?: ""
-                                    pageProgress = 0.2f
-                                    canGoBack = view?.canGoBack() ?: false
-                                    canGoForward = view?.canGoForward() ?: false
-                                }
-
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    pageProgress = 1f
-                                    canGoBack = view?.canGoBack() ?: false
-                                    canGoForward = view?.canGoForward() ?: false
-                                    currentTab.title = view?.title ?: "Page"
-
-                                    // Automatic video detection script
-                                    val checkVideoJs = """
-                                        (function() {
-                                            var v = document.querySelector('video');
-                                            if (v && v.src) return v.src;
-                                            var sources = document.querySelectorAll('video source');
-                                            for (var i=0; i<sources.length; i++) {
-                                                if (sources[i].src) return sources[i].src;
-                                            }
-                                            return '';
-                                        })();
-                                    """.trimIndent()
-                                    view?.evaluateJavascript(checkVideoJs) { result ->
-                                        val clean = result?.replace("\"", "")?.trim()
-                                        if (!clean.isNullOrEmpty() && clean != "null") {
-                                            detectedVideoUrl = clean
-                                            detectedVideoTitle = view?.title ?: "Web Video"
-                                        }
-                                    }
-
-                                    if (url?.contains("youtube.com") == true || url?.contains("vimeo") == true || url?.contains(".mp4") == true) {
-                                        detectedVideoUrl = url
-                                        detectedVideoTitle = view?.title ?: "Streaming Video"
-                                    }
-                                }
-
-                                override fun shouldInterceptRequest(
-                                    view: WebView?,
-                                    request: WebResourceRequest?
-                                ): WebResourceResponse? {
-                                    val reqUrl = request?.url?.toString() ?: ""
-                                    if (reqUrl.endsWith(".mp4", true) || reqUrl.contains(".mp4?") || reqUrl.contains("videoplayback")) {
-                                        detectedVideoUrl = reqUrl
-                                    }
-                                    return super.shouldInterceptRequest(view, request)
-                                }
-                            }
-
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                    pageProgress = newProgress / 100f
-                                    super.onProgressChanged(view, newProgress)
-                                }
-
-                                override fun onReceivedTitle(view: WebView?, title: String?) {
-                                    super.onReceivedTitle(view, title)
-                                    if (!title.isNullOrEmpty()) {
-                                        currentTab.title = title
-                                    }
-                                }
-                            }
-
-                            loadUrl(currentTab.url)
-                        }
-                    },
-                    update = { wv ->
-                        webViewInstance = wv
-                        if (wv.url != currentTab.url && currentTab.url.isNotEmpty()) {
-                            wv.loadUrl(currentTab.url)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // Floating Video Downloader Button
-                AnimatedVisibility(
-                    visible = detectedVideoUrl != null,
-                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            // Floating Video Downloader Button
+            AnimatedVisibility(
+                visible = detectedVideoUrl != null && activeTab.url.isNotEmpty(),
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+            ) {
+                Box(
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(20.dp)
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFEF4444))
+                        .border(2.dp, Color.White, CircleShape)
+                        .clickable { showResolutionPicker = true }
+                        .testTag("snaptube_download_button"),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFEF4444))
-                            .border(2.dp, Color.White, CircleShape)
-                            .clickable { showResolutionPicker = true }
-                            .testTag("snaptube_download_button"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FileDownload,
-                            contentDescription = "Download Video",
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.FileDownload,
+                        contentDescription = "Download Video",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
         }
@@ -706,6 +830,7 @@ fun VaultBrowserScreen(
                                     .clickable {
                                         activeTabIndex = index
                                         inputUrl = tab.url
+                                        currentFavicon = tab.favicon
                                         showTabSwitcher = false
                                     },
                                 colors = CardDefaults.cardColors(containerColor = VaultBackground),
@@ -721,6 +846,26 @@ fun VaultBrowserScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val tabFav = tab.favicon
+                                    if (tabFav != null) {
+                                        Image(
+                                            bitmap = tabFav.asImageBitmap(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Language,
+                                            contentDescription = null,
+                                            tint = VaultTextSecondary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                    }
+
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = tab.title,
@@ -747,6 +892,7 @@ fun VaultBrowserScreen(
                                                 if (removingCurrent) {
                                                     activeTabIndex = (activeTabIndex - 1).coerceAtLeast(0)
                                                     inputUrl = tabs[activeTabIndex].url
+                                                    currentFavicon = tabs[activeTabIndex].favicon
                                                 }
                                             },
                                             modifier = Modifier.size(28.dp)
@@ -767,6 +913,7 @@ fun VaultBrowserScreen(
                             tabs.add(newTab)
                             activeTabIndex = tabs.lastIndex
                             inputUrl = ""
+                            currentFavicon = null
                             showTabSwitcher = false
                         },
                         modifier = Modifier.fillMaxWidth().testTag("new_tab_button"),

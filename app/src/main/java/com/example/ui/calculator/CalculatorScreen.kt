@@ -2,6 +2,7 @@ package com.example.ui.calculator
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,6 +80,35 @@ fun CalculatorScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.Bottom
             ) {
+                // Top discreet header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Calculator",
+                        color = Color(0xFF555555),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    if (!state.isPinConfigured) {
+                        Text(
+                            text = "Set PIN",
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { viewModel.openPinSetup() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .testTag("top_pin_setup_button")
+                        )
+                    }
+                }
+
                 // Calculator Display Area
                 Column(
                     modifier = Modifier
@@ -170,7 +200,7 @@ fun CalculatorScreen(
     // Modal Overlays
     if (state.showPinSetup) {
         PinSetupDialog(
-            onDismiss = {},
+            onDismiss = { viewModel.dismissPinSetup() },
             onConfirm = { pin, question, answer ->
                 viewModel.completePinSetup(pin, question, answer)
             }

@@ -32,16 +32,51 @@ import com.example.ui.vault.VaultSettingsScreen
 import com.example.ui.vault.VaultTrashScreen
 import com.example.ui.vault.VaultViewModel
 
+import android.view.WindowManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.navigation.NavHostController
+
 class MainActivity : ComponentActivity() {
     private val calculatorViewModel: CalculatorViewModel by viewModels()
     private val vaultViewModel: VaultViewModel by viewModels()
+    private var navControllerRef: NavHostController? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Ensure FLAG_SECURE is cleared so streaming emulator and preview can render the UI
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+
+        // Auto-Reset to Calculator on Exit observer
+        lifecycle.addObserver(LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                if (vaultViewModel.prefs.resetOnExit) {
+                    calculatorViewModel.resetKeypad()
+                    navControllerRef?.let { nav ->
+                        if (nav.currentDestination?.route != "calculator") {
+                            nav.navigate("calculator") {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
+                    }
+                }
+            }
+        })
 
         setContent {
             val vaultUiState by vaultViewModel.uiState.collectAsStateWithLifecycle()
+
+            // Dynamic FLAG_SECURE: In streaming emulator/debug environments, FLAG_SECURE
+            // causes the screen mirror / WebRTC stream to render as a solid black screen.
+            // Only apply FLAG_SECURE in production release builds.
+            androidx.compose.runtime.LaunchedEffect(vaultUiState.hideRecentsPreview, vaultUiState.blockScreenshots) {
+                if (!BuildConfig.DEBUG && (vaultUiState.hideRecentsPreview || vaultUiState.blockScreenshots)) {
+                    window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
 
             MyApplicationTheme(accentIndex = vaultUiState.accentIndex) {
                 Surface(
@@ -49,6 +84,7 @@ class MainActivity : ComponentActivity() {
                     color = VaultBackground
                 ) {
                     val navController = rememberNavController()
+                    navControllerRef = navController
 
                     NavHost(
                         navController = navController,

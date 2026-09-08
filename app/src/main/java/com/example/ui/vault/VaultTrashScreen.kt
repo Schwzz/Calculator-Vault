@@ -201,11 +201,21 @@ fun VaultTrashScreen(
                                 )
                                 Text("Note • ${note.content.length} chars", color = VaultTextSecondary, fontSize = 11.sp)
                             }
-                            IconButton(onClick = { viewModel.restoreNote(note.id) }) {
-                                Icon(Icons.Default.Restore, contentDescription = "Restore", tint = MaterialTheme.colorScheme.primary)
-                            }
-                            IconButton(onClick = { viewModel.deleteNotePermanently(note.id) }) {
-                                Icon(Icons.Default.DeleteForever, contentDescription = "Delete Forever", tint = Color(0xFFEF4444))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = { viewModel.restoreNote(note.id) },
+                                    modifier = Modifier.size(44.dp).testTag("trash_restore_note_${note.id}")
+                                ) {
+                                    Icon(Icons.Default.Restore, contentDescription = "Restore", tint = MaterialTheme.colorScheme.primary)
+                                }
+                                IconButton(
+                                    onClick = { viewModel.deleteNotePermanently(note.id) },
+                                    modifier = Modifier.size(44.dp).testTag("trash_delete_note_${note.id}")
+                                ) {
+                                    Icon(Icons.Default.DeleteForever, contentDescription = "Delete Forever", tint = Color(0xFFEF4444))
+                                }
                             }
                         }
                     }
@@ -249,11 +259,29 @@ fun VaultTrashScreen(
                                 )
                                 Text("${formatFileSize(item.sizeBytes)} • ${item.fileType.name}", color = VaultTextSecondary, fontSize = 11.sp)
                             }
-                            IconButton(onClick = { viewModel.restoreSelectedFromTrash() }) {
-                                Icon(Icons.Default.Restore, contentDescription = "Restore", tint = MaterialTheme.colorScheme.primary)
-                            }
-                            IconButton(onClick = { viewModel.deleteSelectedPermanently() }) {
-                                Icon(Icons.Default.DeleteForever, contentDescription = "Delete Forever", tint = Color(0xFFEF4444))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = { viewModel.restoreItem(item) },
+                                    modifier = Modifier.size(44.dp).testTag("trash_restore_item_${item.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Restore,
+                                        contentDescription = "Restore ${item.name}",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { viewModel.deleteItemPermanently(item) },
+                                    modifier = Modifier.size(44.dp).testTag("trash_delete_permanently_${item.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteForever,
+                                        contentDescription = "Delete Forever ${item.name}",
+                                        tint = Color(0xFFEF4444)
+                                    )
+                                }
                             }
                         }
                     }

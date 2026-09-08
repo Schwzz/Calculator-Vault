@@ -1,6 +1,7 @@
 package com.example.ui.vault
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -42,6 +44,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -166,6 +170,9 @@ fun DownloadItemCard(
 ) {
     val isCompleted = download.status == DownloadStatus.COMPLETED
     val isPaused = download.status == DownloadStatus.PAUSED
+    val videoThumbnail = if (isCompleted && download.localPath.isNotEmpty()) {
+        rememberVideoThumbnail(download.localPath)
+    } else null
 
     Card(
         modifier = Modifier
@@ -178,9 +185,35 @@ fun DownloadItemCard(
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Async Video Thumbnail Preview
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF1E1E1E)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (videoThumbnail != null) {
+                        Image(
+                            bitmap = videoThumbnail.asImageBitmap(),
+                            contentDescription = "Thumbnail",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isCompleted) Icons.Default.Videocam else Icons.Default.Download,
+                            contentDescription = null,
+                            tint = if (isCompleted) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = download.title,
