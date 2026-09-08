@@ -1,0 +1,7 @@
+{
+  "name": "Calculator",
+  "description": "A functional calculator disguise with a private vault for photos, videos, files, notes, and secure private browser.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
