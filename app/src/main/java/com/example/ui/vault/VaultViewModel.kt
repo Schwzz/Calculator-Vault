@@ -46,8 +46,8 @@ data class VaultUiState(
     val accentIndex: Int = 0,
     val storageBreakdown: StorageBreakdown = StorageBreakdown(),
     val resetOnExit: Boolean = true,
-    val hideRecentsPreview: Boolean = false,
-    val blockScreenshots: Boolean = false,
+    val hideRecentsPreview: Boolean = true,
+    val blockScreenshots: Boolean = true,
     val searchEngine: String = "Google"
 )
 

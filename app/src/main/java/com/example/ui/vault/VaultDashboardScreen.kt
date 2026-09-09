@@ -87,7 +87,6 @@ data class DashboardItemData(
     val subtitle: String,
     val icon: ImageVector,
     val route: String,
-    val isPrimaryAccent: Boolean = false,
     val badgeCount: Int = 0
 )
 
@@ -161,7 +160,6 @@ fun VaultDashboardScreen(
             subtitle = if (photoCount == 1) "1 Item" else "$photoCount Items",
             icon = Icons.Default.Image,
             route = "vault_files/PHOTO",
-            isPrimaryAccent = true,
             badgeCount = photoCount
         ),
         DashboardItemData(
@@ -169,7 +167,6 @@ fun VaultDashboardScreen(
             subtitle = if (videoCount == 1) "1 Item" else "$videoCount Items",
             icon = Icons.Default.Videocam,
             route = "vault_files/VIDEO",
-            isPrimaryAccent = true,
             badgeCount = videoCount
         ),
         DashboardItemData(
@@ -177,7 +174,6 @@ fun VaultDashboardScreen(
             subtitle = if (audioCount == 1) "1 Item" else "$audioCount Items",
             icon = Icons.Default.Audiotrack,
             route = "vault_files/AUDIO",
-            isPrimaryAccent = false,
             badgeCount = audioCount
         ),
         DashboardItemData(
@@ -185,7 +181,6 @@ fun VaultDashboardScreen(
             subtitle = if (fileCount == 1) "1 Item" else "$fileCount Items",
             icon = Icons.Default.Description,
             route = "vault_files/FILE",
-            isPrimaryAccent = false,
             badgeCount = fileCount
         ),
         DashboardItemData(
@@ -193,22 +188,19 @@ fun VaultDashboardScreen(
             subtitle = if (noteCount == 1) "1 Note" else "$noteCount Notes",
             icon = Icons.Default.EditNote,
             route = "vault_notes",
-            isPrimaryAccent = false,
             badgeCount = noteCount
         ),
         DashboardItemData(
             title = "Browser",
             subtitle = "Incognito",
             icon = Icons.Default.Public,
-            route = "vault_browser",
-            isPrimaryAccent = false
+            route = "vault_browser"
         ),
         DashboardItemData(
             title = "Downloads",
             subtitle = if (totalDownloads == 1) "1 Item" else "$totalDownloads Items",
             icon = Icons.Default.Download,
             route = "vault_downloads",
-            isPrimaryAccent = false,
             badgeCount = totalDownloads
         ),
         DashboardItemData(
@@ -216,15 +208,13 @@ fun VaultDashboardScreen(
             subtitle = if (totalTrash == 0) "Empty" else "$totalTrash Items",
             icon = Icons.Outlined.DeleteOutline,
             route = "vault_trash",
-            isPrimaryAccent = false,
             badgeCount = totalTrash
         ),
         DashboardItemData(
             title = "Settings",
             subtitle = "Customization",
             icon = Icons.Default.Settings,
-            route = "vault_settings",
-            isPrimaryAccent = false
+            route = "vault_settings"
         )
     )
 
@@ -279,7 +269,7 @@ fun VaultDashboardScreen(
                     )
                     DropdownMenuItem(
                         text = { Text("Import Audio", color = VaultTextPrimary) },
-                        leadingIcon = { Icon(Icons.Default.Audiotrack, contentDescription = null, tint = VaultTextTertiary) },
+                        leadingIcon = { Icon(Icons.Default.Audiotrack, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = {
                             showFabMenu = false
                             audioPicker.launch("audio/*")
@@ -287,7 +277,7 @@ fun VaultDashboardScreen(
                     )
                     DropdownMenuItem(
                         text = { Text("Import General Files", color = VaultTextPrimary) },
-                        leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, tint = VaultTextTertiary) },
+                        leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = {
                             showFabMenu = false
                             generalPicker.launch("*/*")
@@ -416,18 +406,6 @@ fun VaultDashboardCard(
     item: DashboardItemData,
     onClick: () -> Unit
 ) {
-    val iconContainerColor = if (item.isPrimaryAccent) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        VaultSurfaceVariant
-    }
-
-    val iconTintColor = if (item.isPrimaryAccent) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        VaultTextTertiary
-    }
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -448,13 +426,13 @@ fun VaultDashboardCard(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(iconContainerColor),
+                    .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = item.icon,
                     contentDescription = item.title,
-                    tint = iconTintColor,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.size(20.dp)
                 )
             }

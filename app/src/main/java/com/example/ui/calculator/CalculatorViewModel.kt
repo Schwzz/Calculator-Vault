@@ -76,7 +76,9 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             it.copy(
                 expression = "0",
                 history = "",
-                result = ""
+                result = "",
+                showRecovery = false,
+                showPinSetup = !prefs.isPinSet
             )
         }
     }

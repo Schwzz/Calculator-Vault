@@ -26,11 +26,11 @@ class VaultPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_RESET_ON_EXIT, value).apply()
 
     var hideRecentsPreview: Boolean
-        get() = prefs.getBoolean(KEY_HIDE_RECENTS, false)
+        get() = prefs.getBoolean(KEY_HIDE_RECENTS, true)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_RECENTS, value).apply()
 
     var blockScreenshots: Boolean
-        get() = prefs.getBoolean(KEY_BLOCK_SCREENSHOTS, false)
+        get() = prefs.getBoolean(KEY_BLOCK_SCREENSHOTS, true)
         set(value) = prefs.edit().putBoolean(KEY_BLOCK_SCREENSHOTS, value).apply()
 
     var searchEngine: String
