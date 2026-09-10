@@ -62,6 +62,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.VaultNote
+import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
@@ -86,6 +87,8 @@ fun VaultNotesScreen(
             it.content.contains(searchQuery, ignoreCase = true)
         }
     }
+
+    val cornerStyle = LocalVaultCornerStyle.current
 
     Scaffold(
         modifier = Modifier
@@ -130,7 +133,7 @@ fun VaultNotesScreen(
                 onClick = { isCreatingNewNote = true },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = CircleShape,
+                shape = cornerStyle.fabShape,
                 modifier = Modifier
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp, end = 16.dp)
@@ -159,7 +162,7 @@ fun VaultNotesScreen(
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = cornerStyle.cardShape,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = VaultCardBorder,
@@ -220,9 +223,9 @@ fun VaultNotesScreen(
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
                                 .clickable { noteToEdit = note }
                                 .testTag("note_card_${note.id}"),
+                            shape = cornerStyle.cardShape,
                             colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
                             border = BorderStroke(1.dp, VaultCardBorder)
                         ) {

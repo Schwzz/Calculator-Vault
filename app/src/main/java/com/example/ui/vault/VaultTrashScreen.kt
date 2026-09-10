@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.VaultFileType
 import com.example.model.VaultItem
 import com.example.model.VaultNote
+import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
@@ -74,6 +75,7 @@ fun VaultTrashScreen(
     var showEmptyTrashConfirm by remember { mutableStateOf(false) }
 
     val totalTrashed = trashItems.size + trashNotes.size
+    val cornerStyle = LocalVaultCornerStyle.current
 
     Scaffold(
         modifier = Modifier
@@ -170,7 +172,8 @@ fun VaultTrashScreen(
                 // Trashed Notes
                 items(trashNotes, key = { "note_${it.id}" }) { note ->
                     Card(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = cornerStyle.cardShape,
                         colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
                         border = BorderStroke(1.dp, VaultCardBorder)
                     ) {
@@ -224,7 +227,8 @@ fun VaultTrashScreen(
                 // Trashed Files
                 items(trashItems, key = { "item_${it.id}" }) { item ->
                     Card(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = cornerStyle.cardShape,
                         colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
                         border = BorderStroke(1.dp, VaultCardBorder)
                     ) {
@@ -300,6 +304,7 @@ fun VaultTrashScreen(
                     color = VaultTextSecondary
                 )
             },
+            shape = cornerStyle.dialogShape,
             containerColor = VaultCardBackground,
             confirmButton = {
                 Button(
@@ -307,13 +312,17 @@ fun VaultTrashScreen(
                         viewModel.emptyTrash()
                         showEmptyTrashConfirm = false
                     },
+                    shape = cornerStyle.buttonShape,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
                 ) {
                     Text("Delete Permanently", color = Color.White)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showEmptyTrashConfirm = false }) {
+                TextButton(
+                    onClick = { showEmptyTrashConfirm = false },
+                    shape = cornerStyle.buttonShape
+                ) {
                     Text("Cancel", color = Color(0xFFA0A0A0))
                 }
             }

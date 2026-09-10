@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ColorLens
@@ -74,9 +75,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.calculator.PRESET_QUESTIONS
 import com.example.ui.theme.AccentPalettes
+import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
+import com.example.ui.theme.VaultCornerStyle
 import com.example.ui.theme.VaultTextPrimary
 import com.example.ui.theme.VaultTextSecondary
 import kotlinx.coroutines.launch
@@ -93,6 +96,8 @@ fun VaultSettingsScreen(
 
     var showChangePinDialog by remember { mutableStateOf(false) }
     var showUpdateSecurityDialog by remember { mutableStateOf(false) }
+
+    val cornerStyle = LocalVaultCornerStyle.current
 
     Scaffold(
         modifier = Modifier
@@ -400,6 +405,97 @@ fun VaultSettingsScreen(
                 }
             }
 
+            // Vault UI Shape & Corner Customization Section
+            item {
+                Text(
+                    text = "VAULT UI SHAPES & CORNERS",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = cornerStyle.cardShape,
+                    colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
+                    border = BorderStroke(1.dp, VaultCardBorder)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Category, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Corner & Component Style", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+                        Text(
+                            "Customize the corner curves of dashboard cards, action buttons, dialogs, and panels",
+                            color = VaultTextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+                        )
+
+                        // 2x2 Grid of shape options
+                        val cornerOptions = VaultCornerStyle.entries
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            cornerOptions.chunked(2).forEach { rowStyles ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    rowStyles.forEach { style ->
+                                        val isSelected = uiState.cornerStyle == style
+                                        Card(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { viewModel.setCornerStyle(style) }
+                                                .testTag("shape_option_${style.id}"),
+                                            shape = style.cardShape,
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else VaultBackground
+                                            ),
+                                            border = BorderStroke(
+                                                width = if (isSelected) 2.dp else 1.dp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else VaultCardBorder
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = style.title,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 13.sp
+                                                    )
+                                                    Text(
+                                                        text = style.subtitle,
+                                                        color = VaultTextSecondary,
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Security Section
             item {
                 Text(
@@ -538,7 +634,7 @@ fun VaultSettingsScreen(
 
         Dialog(onDismissRequest = { showChangePinDialog = false }) {
             Surface(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
+                modifier = Modifier.fillMaxWidth().clip(cornerStyle.dialogShape),
                 color = VaultCardBackground,
                 border = BorderStroke(1.dp, VaultCardBorder)
             ) {
@@ -645,7 +741,7 @@ fun VaultSettingsScreen(
 
         Dialog(onDismissRequest = { showUpdateSecurityDialog = false }) {
             Surface(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
+                modifier = Modifier.fillMaxWidth().clip(cornerStyle.dialogShape),
                 color = VaultCardBackground,
                 border = BorderStroke(1.dp, VaultCardBorder)
             ) {

@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,7 +22,6 @@ import com.example.model.VaultFileType
 import com.example.ui.calculator.CalculatorScreen
 import com.example.ui.calculator.CalculatorViewModel
 import com.example.ui.theme.MyApplicationTheme
-import com.example.ui.theme.VaultBackground
 import com.example.ui.vault.VaultBrowserScreen
 import com.example.ui.vault.VaultDashboardScreen
 import com.example.ui.vault.VaultDownloadsScreen
@@ -42,18 +42,20 @@ class MainActivity : ComponentActivity() {
     private val vaultViewModel: VaultViewModel by viewModels()
     private var navControllerRef: NavHostController? = null
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-
-        // Apply initial Window FLAG_SECURE based on security preferences
-        val initialHideRecents = vaultViewModel.prefs.hideRecentsPreview
-        val initialBlockScreenshots = vaultViewModel.prefs.blockScreenshots
-        if (initialHideRecents || initialBlockScreenshots) {
+    private fun updateWindowSecurityFlags(hideRecents: Boolean, blockScreenshots: Boolean) {
+        val isSecureNeeded = hideRecents || blockScreenshots
+        // In debug / streaming preview emulator environments, SurfaceFlinger blanks out WebRTC screen capture into black if FLAG_SECURE is applied.
+        // Therefore, we bypass FLAG_SECURE in debug mode to ensure emulator preview renders properly.
+        if (!BuildConfig.DEBUG && isSecureNeeded) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
         // Auto-Reset to Calculator on Exit observer
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
@@ -77,19 +79,16 @@ class MainActivity : ComponentActivity() {
 
             // Dynamic FLAG_SECURE: Actively react to hideRecents or blockScreenshots state
             androidx.compose.runtime.LaunchedEffect(vaultUiState.hideRecentsPreview, vaultUiState.blockScreenshots) {
-                val isHideRecentsEnabled = vaultUiState.hideRecentsPreview
-                val isBlockScreenshotsEnabled = vaultUiState.blockScreenshots
-                if (isHideRecentsEnabled || isBlockScreenshotsEnabled) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                } else {
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                }
+                updateWindowSecurityFlags(vaultUiState.hideRecentsPreview, vaultUiState.blockScreenshots)
             }
 
-            MyApplicationTheme(accentIndex = vaultUiState.accentIndex) {
+            MyApplicationTheme(
+                accentIndex = vaultUiState.accentIndex,
+                cornerStyle = vaultUiState.cornerStyle
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = VaultBackground
+                    color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
                     navControllerRef = navController
@@ -224,6 +223,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Ensure FLAG_SECURE is re-verified and active whenever the app is brought back into foreground
+        updateWindowSecurityFlags(
+            hideRecents = vaultViewModel.prefs.hideRecentsPreview,
+            blockScreenshots = vaultViewModel.prefs.blockScreenshots
+        )
         if (vaultViewModel.prefs.resetOnExit) {
             navControllerRef?.let { nav ->
                 if (nav.currentDestination != null && nav.currentDestination?.route != "calculator") {

@@ -13,6 +13,7 @@ import com.example.model.VaultDownload
 import com.example.model.VaultFileType
 import com.example.model.VaultItem
 import com.example.model.VaultNote
+import com.example.ui.theme.VaultCornerStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -48,7 +49,8 @@ data class VaultUiState(
     val resetOnExit: Boolean = true,
     val hideRecentsPreview: Boolean = true,
     val blockScreenshots: Boolean = true,
-    val searchEngine: String = "Google"
+    val searchEngine: String = "Google",
+    val cornerStyle: VaultCornerStyle = VaultCornerStyle.SOFT
 )
 
 class VaultViewModel(application: Application) : AndroidViewModel(application) {
@@ -77,7 +79,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             resetOnExit = prefs.resetOnExit,
             hideRecentsPreview = prefs.hideRecentsPreview,
             blockScreenshots = prefs.blockScreenshots,
-            searchEngine = prefs.searchEngine
+            searchEngine = prefs.searchEngine,
+            cornerStyle = VaultCornerStyle.fromId(prefs.cornerStyle)
         )
     )
     val uiState: StateFlow<VaultUiState> = _uiState.asStateFlow()
@@ -129,6 +132,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     fun setAccentColorIndex(index: Int) {
         prefs.accentColorIndex = index
         _uiState.update { it.copy(accentIndex = index) }
+    }
+
+    fun setCornerStyle(style: VaultCornerStyle) {
+        prefs.cornerStyle = style.id
+        _uiState.update { it.copy(cornerStyle = style) }
     }
 
     // Multi-Select

@@ -19,7 +19,12 @@ class VaultPreferences(context: Context) {
         private const val KEY_HIDE_RECENTS = "hide_recents_preview"
         private const val KEY_BLOCK_SCREENSHOTS = "block_screenshots"
         private const val KEY_SEARCH_ENGINE = "search_engine"
+        private const val KEY_CORNER_STYLE = "corner_style"
     }
+
+    var cornerStyle: String
+        get() = prefs.getString(KEY_CORNER_STYLE, "soft") ?: "soft"
+        set(value) = prefs.edit().putString(KEY_CORNER_STYLE, value).apply()
 
     var resetOnExit: Boolean
         get() = prefs.getBoolean(KEY_RESET_ON_EXIT, true)

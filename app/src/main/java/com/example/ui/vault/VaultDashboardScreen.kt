@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.VaultFileType
+import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
@@ -218,6 +219,8 @@ fun VaultDashboardScreen(
         )
     )
 
+    val cornerStyle = LocalVaultCornerStyle.current
+
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -230,7 +233,7 @@ fun VaultDashboardScreen(
                     onClick = { showFabMenu = true },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = RoundedCornerShape(22.dp),
+                    shape = cornerStyle.fabShape,
                     modifier = Modifier
                         .navigationBarsPadding()
                         .padding(bottom = 16.dp, end = 16.dp)
@@ -249,7 +252,7 @@ fun VaultDashboardScreen(
                     onDismissRequest = { showFabMenu = false },
                     modifier = Modifier
                         .background(VaultCardBackground)
-                        .border(1.dp, VaultCardBorder, RoundedCornerShape(12.dp))
+                        .border(1.dp, VaultCardBorder, cornerStyle.cardShape)
                 ) {
                     DropdownMenuItem(
                         text = { Text("Import Photos", color = VaultTextPrimary) },
@@ -406,13 +409,14 @@ fun VaultDashboardCard(
     item: DashboardItemData,
     onClick: () -> Unit
 ) {
+    val cornerStyle = LocalVaultCornerStyle.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .height(58.dp)
             .clickable(onClick = onClick)
             .testTag("dashboard_card_${item.title.lowercase().replace(' ', '_')}"),
-        shape = RoundedCornerShape(12.dp),
+        shape = cornerStyle.cardShape,
         colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
         border = BorderStroke(1.dp, VaultCardBorder)
     ) {

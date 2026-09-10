@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.DownloadStatus
 import com.example.model.VaultDownload
+import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
@@ -173,12 +174,13 @@ fun DownloadItemCard(
     val videoThumbnail = if (isCompleted && download.localPath.isNotEmpty()) {
         rememberVideoThumbnail(download.localPath)
     } else null
+    val cornerStyle = LocalVaultCornerStyle.current
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
             .testTag("download_item_${download.id}"),
+        shape = cornerStyle.cardShape,
         colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
         border = BorderStroke(1.dp, VaultCardBorder)
     ) {

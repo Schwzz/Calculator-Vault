@@ -93,6 +93,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.model.VaultFileType
 import com.example.model.VaultItem
+import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
@@ -163,6 +164,8 @@ fun VaultFilesScreen(
 
     var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
     var selectedFileDetails by remember { mutableStateOf<VaultItem?>(null) }
+
+    val cornerStyle = LocalVaultCornerStyle.current
 
     Scaffold(
         modifier = Modifier
@@ -299,7 +302,7 @@ fun VaultFilesScreen(
                     onClick = { filePicker.launch(mimeType) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = CircleShape,
+                    shape = cornerStyle.fabShape,
                     modifier = Modifier
                         .navigationBarsPadding()
                         .padding(bottom = 16.dp, end = 16.dp)
@@ -416,7 +419,8 @@ fun VaultFilesScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp)),
+                    .clip(cornerStyle.dialogShape),
+                shape = cornerStyle.dialogShape,
                 color = VaultCardBackground,
                 border = BorderStroke(1.dp, VaultCardBorder)
             ) {
@@ -459,10 +463,13 @@ fun VaultFilesScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = {
-                            viewModel.unhideSelected(context)
-                            selectedFileDetails = null
-                        }) {
+                        TextButton(
+                            onClick = {
+                                viewModel.unhideSelected(context)
+                                selectedFileDetails = null
+                            },
+                            shape = cornerStyle.buttonShape
+                        ) {
                             Text("Unhide to Storage", color = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -481,17 +488,18 @@ fun VaultItemCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    val cornerStyle = LocalVaultCornerStyle.current
     val isMediaGrid = item.fileType == VaultFileType.PHOTO || item.fileType == VaultFileType.VIDEO
 
     if (isMediaGrid) {
         Card(
             modifier = Modifier
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(cornerStyle.cardShape)
                 .border(
                     width = if (isSelected) 2.dp else 1.dp,
                     color = if (isSelected) MaterialTheme.colorScheme.primary else VaultCardBorder,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = cornerStyle.cardShape
                 )
                 .combinedClickable(
                     onClick = onClick,
@@ -611,11 +619,11 @@ fun VaultItemCard(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .clip(cornerStyle.cardShape)
                 .border(
                     width = if (isSelected) 2.dp else 1.dp,
                     color = if (isSelected) MaterialTheme.colorScheme.primary else VaultCardBorder,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = cornerStyle.cardShape
                 )
                 .combinedClickable(
                     onClick = onClick,

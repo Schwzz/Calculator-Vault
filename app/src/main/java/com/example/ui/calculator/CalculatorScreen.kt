@@ -37,10 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ui.theme.CalcActionKeyBg
 import com.example.ui.theme.CalcNumKeyBg
-import com.example.ui.theme.CalcOperatorKeyBg
-import com.example.ui.theme.VaultBackground
 import kotlinx.coroutines.flow.collectLatest
 
 @Composable
@@ -66,10 +63,8 @@ fun CalculatorScreen(
     }
 
     Surface(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(VaultBackground),
-        color = VaultBackground
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -232,15 +227,15 @@ fun CalcButton(
 
     val bgColor = when {
         isEquals -> MaterialTheme.colorScheme.primary
-        isOperator -> CalcOperatorKeyBg
-        isAction -> CalcActionKeyBg
+        isOperator -> MaterialTheme.colorScheme.primaryContainer
+        isAction -> MaterialTheme.colorScheme.primaryContainer
         else -> CalcNumKeyBg
     }
 
     val textColor = when {
         isEquals -> MaterialTheme.colorScheme.onPrimary
-        isOperator -> MaterialTheme.colorScheme.primary
-        isAction -> Color(0xFFE2E8F0)
+        isOperator -> MaterialTheme.colorScheme.onPrimaryContainer
+        isAction -> MaterialTheme.colorScheme.onPrimaryContainer
         else -> Color.White
     }
 

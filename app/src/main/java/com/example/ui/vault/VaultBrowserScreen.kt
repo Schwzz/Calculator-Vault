@@ -3,11 +3,13 @@ package com.example.ui.vault
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.view.View
+import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -44,12 +46,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -61,8 +66,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -70,6 +78,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,6 +108,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.LocalVaultCornerStyle
+import kotlinx.coroutines.launch
 
 class BrowserTab(
     val id: String = java.util.UUID.randomUUID().toString(),
@@ -152,6 +163,11 @@ fun VaultBrowserScreen(
     var detectedVideoUrl by remember { mutableStateOf<String?>(null) }
     var detectedVideoTitle by remember { mutableStateOf("Web Video") }
     var showResolutionPicker by remember { mutableStateOf(false) }
+    var showClearDataConfirm by remember { mutableStateOf(false) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val cornerStyle = LocalVaultCornerStyle.current
 
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -219,6 +235,7 @@ fun VaultBrowserScreen(
             .fillMaxSize()
             .background(VaultBackground),
         containerColor = VaultBackground,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Surface(
                 color = VaultCardBackground,
@@ -361,6 +378,17 @@ fun VaultBrowserScreen(
                             modifier = Modifier.testTag("browser_downloads_button")
                         ) {
                             Icon(Icons.Default.Download, contentDescription = "Downloads", tint = MaterialTheme.colorScheme.primary)
+                        }
+
+                        IconButton(
+                            onClick = { showClearDataConfirm = true },
+                            modifier = Modifier.testTag("browser_clear_data_button")
+                        ) {
+                            Icon(
+                                Icons.Outlined.DeleteOutline,
+                                contentDescription = "Clear Browser Data",
+                                tint = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
 
@@ -917,7 +945,7 @@ fun VaultBrowserScreen(
                             showTabSwitcher = false
                         },
                         modifier = Modifier.fillMaxWidth().testTag("new_tab_button"),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = cornerStyle.buttonShape,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -927,6 +955,86 @@ fun VaultBrowserScreen(
                 }
             }
         }
+    }
+
+    // Clear Browser Data Confirmation Dialog
+    if (showClearDataConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearDataConfirm = false },
+            title = {
+                Text(
+                    text = "Clear All Browser Data?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "This will delete all cookies, web storage, browser cache, and browsing history permanently.",
+                    color = VaultTextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        try {
+                            // 1. WebStorage delete all data
+                            WebStorage.getInstance().deleteAllData()
+
+                            // 2. CookieManager remove all cookies
+                            CookieManager.getInstance().removeAllCookies(null)
+                            CookieManager.getInstance().flush()
+
+                            // 3. Clear active WebView history and cache
+                            webViewInstance?.let { wv ->
+                                wv.clearHistory()
+                                wv.clearCache(true)
+                                wv.clearFormData()
+                                wv.clearSslPreferences()
+                            }
+
+                            // 4. Reset active tabs and URLs to clean state
+                            tabs.clear()
+                            val cleanTab = BrowserTab()
+                            tabs.add(cleanTab)
+                            activeTabIndex = 0
+                            inputUrl = ""
+                            currentFavicon = null
+                            detectedVideoUrl = null
+                            canGoBack = false
+                            canGoForward = false
+
+                            // Show confirmation snackbar
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Browser cache & history cleared")
+                            }
+                        } catch (e: Exception) {
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Cleared browser data")
+                            }
+                        } finally {
+                            showClearDataConfirm = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    shape = cornerStyle.buttonShape,
+                    modifier = Modifier.testTag("confirm_clear_browser_data_button")
+                ) {
+                    Text("Clear All Data", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showClearDataConfirm = false },
+                    shape = cornerStyle.buttonShape
+                ) {
+                    Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
     }
 }
 
