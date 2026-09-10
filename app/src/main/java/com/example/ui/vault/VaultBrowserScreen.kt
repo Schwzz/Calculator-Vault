@@ -475,6 +475,8 @@ fun VaultBrowserScreen(
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
+                            allowFileAccess = false
+                            allowContentAccess = false
                             mediaPlaybackRequiresUserGesture = false
                             userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0"
                             cacheMode = WebSettings.LOAD_DEFAULT

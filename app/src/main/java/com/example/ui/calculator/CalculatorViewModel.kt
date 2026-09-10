@@ -156,10 +156,9 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         val expr = _uiState.value.expression.trim()
 
         // 1. Silent Vault Unlock Check
-        // If expression matches configured PIN or default PIN (1234) without operators, unlock!
+        // Only unlock if the expression exactly matches the user's configured PIN.
         val cleanPinCandidate = expr.replace(" ", "")
-        if (cleanPinCandidate == prefs.pin || cleanPinCandidate == "1234") {
-            // If user typed 1234 or configured PIN, unlock vault
+        if (cleanPinCandidate == prefs.pin) {
             if (!prefs.isPinSet) {
                 prefs.isPinSet = true
             }
@@ -167,12 +166,6 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             viewModelScope.launch {
                 _navEvents.emit(CalculatorNavEvent.UnlockVault)
             }
-            return
-        }
-
-        // Secret recovery backdoor code "000000" or long PIN check
-        if (cleanPinCandidate == "000000") {
-            _uiState.update { it.copy(showRecovery = true, expression = "0") }
             return
         }
 
@@ -248,12 +241,17 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun evaluateTokens(tokens: List<String>): Double {
+        if (tokens.isEmpty()) throw IllegalArgumentException("Empty expression")
+
         // First pass: multiplication and division
         val firstPass = mutableListOf<String>()
         var i = 0
         while (i < tokens.size) {
             val token = tokens[i]
             if (token == "*" || token == "/") {
+                if (firstPass.isEmpty() || i + 1 >= tokens.size) {
+                    throw IllegalArgumentException("Malformed operator")
+                }
                 val prev = firstPass.removeAt(firstPass.lastIndex).toDouble()
                 val next = tokens[i + 1].toDouble()
                 val res = if (token == "*") prev * next else {
@@ -268,11 +266,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             }
         }
 
+        if (firstPass.isEmpty()) throw IllegalArgumentException("Invalid tokens")
+
         // Second pass: addition and subtraction
         var result = firstPass[0].toDouble()
         var j = 1
         while (j < firstPass.size) {
             val op = firstPass[j]
+            if (j + 1 >= firstPass.size) {
+                throw IllegalArgumentException("Incomplete expression")
+            }
             val next = firstPass[j + 1].toDouble()
             result = if (op == "+") result + next else result - next
             j += 2

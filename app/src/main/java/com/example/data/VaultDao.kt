@@ -25,6 +25,9 @@ interface VaultDao {
     @Query("SELECT * FROM vault_items WHERE isTrash = 1 ORDER BY trashedAt DESC")
     fun getTrashItems(): Flow<List<VaultItem>>
 
+    @Query("SELECT * FROM vault_items WHERE isTrash = 1")
+    suspend fun getTrashItemsList(): List<VaultItem>
+
     @Query("SELECT * FROM vault_items WHERE id = :id LIMIT 1")
     suspend fun getItemById(id: Long): VaultItem?
 

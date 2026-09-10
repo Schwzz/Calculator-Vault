@@ -143,10 +143,15 @@ class VaultRepository(
                     }
                 }
 
+                var bytesCopied = 0L
                 if (targetUri != null) {
-                    resolver.openOutputStream(targetUri)?.use { outStream ->
+                    val outStream = resolver.openOutputStream(targetUri)
+                    if (outStream == null) {
+                        return@withContext false
+                    }
+                    outStream.use { output ->
                         sourceFile.inputStream().use { inStream ->
-                            inStream.copyTo(outStream)
+                            bytesCopied = inStream.copyTo(output)
                         }
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -154,12 +159,21 @@ class VaultRepository(
                         contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                         resolver.update(targetUri, contentValues, null, null)
                     }
+                } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && item.fileType == VaultFileType.FILE) {
+                    val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val targetFile = File(publicDir, item.name)
+                    sourceFile.copyTo(targetFile, overwrite = true)
+                    bytesCopied = targetFile.length()
                 }
 
-                // Delete private hidden copy and remove from DB
-                sourceFile.delete()
-                dao.deleteItemsPermanently(listOf(item.id))
-                true
+                if (bytesCopied > 0 || sourceFile.length() == 0L) {
+                    // Delete private hidden copy and remove from DB only after verified write
+                    sourceFile.delete()
+                    dao.deleteItemsPermanently(listOf(item.id))
+                    true
+                } else {
+                    false
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 false
@@ -190,7 +204,24 @@ class VaultRepository(
 
     suspend fun emptyTrash() {
         withContext(Dispatchers.IO) {
-            // Trash items
+            // 1. Fetch all items in trash and physically delete their files from disk
+            try {
+                val trashItems = dao.getTrashItemsList()
+                trashItems.forEach { item ->
+                    try {
+                        val file = File(item.storedPath)
+                        if (file.exists()) {
+                            file.delete()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            // 2. Clear trash records in database
             dao.emptyTrashItems()
             dao.emptyTrashNotes()
         }

@@ -91,7 +91,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingDeleteIntentSender = MutableSharedFlow<androidx.activity.result.IntentSenderRequest>()
     val pendingDeleteIntentSender: SharedFlow<androidx.activity.result.IntentSenderRequest> = _pendingDeleteIntentSender.asSharedFlow()
 
-    private var simulatedDownloadJob: Job? = null
+    private val activeDownloadJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+    private val pausedDownloads = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
     init {
         viewModelScope.launch {
@@ -208,7 +209,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             if (count > 0) {
-                _userMessage.emit("Successfully encrypted and hid $count file(s)")
+                _userMessage.emit("Successfully imported and secured $count file(s) in Vault")
             }
             if (urisNeedingDeletePermission.isNotEmpty()) {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
@@ -344,7 +345,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val context = getApplication<Application>()
             val vaultDir = File(context.filesDir, "vault_files").apply { if (!exists()) mkdirs() }
-            val cleanTitle = title.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+            val cleanTitle = title.replace("[^a-zA-Z0-9._-]".toRegex(), "_").ifEmpty { "video_${System.currentTimeMillis()}" }
             val targetFile = File(vaultDir, "${cleanTitle}_${System.currentTimeMillis()}.mp4")
 
             val download = VaultDownload(
@@ -361,11 +362,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             val downloadId = repository.addDownload(download)
             _userMessage.emit("Download started: $cleanTitle ($resolution)")
 
-            launch(Dispatchers.IO) {
+            val downloadJob = launch(Dispatchers.IO) {
                 var durationMs = 0L
                 var downloadSuccess = false
 
-                if (url.startsWith("http://") || url.startsWith("https://")) {
+                if (url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)) {
                     try {
                         val connection = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
                             connectTimeout = 10000
@@ -376,7 +377,6 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                         val responseCode = connection.responseCode
                         val contentType = connection.contentType ?: ""
 
-                        // Validate HTTP response codes and Content-Type headers
                         if (responseCode in 200..299 && !contentType.contains("text/html", ignoreCase = true)) {
                             val contentLength = connection.contentLengthLong.let { if (it > 0) it else estimatedBytes }
                             var totalDownloaded = 0L
@@ -388,14 +388,21 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                                     val buffer = ByteArray(16384)
                                     var read: Int
                                     while (input.read(buffer).also { read = it } != -1) {
+                                        // Check if cancelled or paused
+                                        if (pausedDownloads.contains(downloadId)) {
+                                            while (pausedDownloads.contains(downloadId)) {
+                                                delay(200)
+                                            }
+                                        }
+
                                         output.write(buffer, 0, read)
                                         totalDownloaded += read
                                         bytesSinceLastUpdate += read
                                         val now = System.currentTimeMillis()
-                                        if (now - lastUpdate > 350) {
+                                        if (now - lastUpdate > 400) {
                                             val elapsedSec = (now - lastUpdate) / 1000.0
-                                            val speedMBs = ((bytesSinceLastUpdate / elapsedSec) / (1024.0 * 1024.0)).coerceAtLeast(0.1)
-                                            val progress = (totalDownloaded.toFloat() / contentLength.toFloat()).coerceIn(0f, 1f)
+                                            val speedMBs = if (elapsedSec > 0) ((bytesSinceLastUpdate / elapsedSec) / (1024.0 * 1024.0)).coerceAtLeast(0.1) else 0.1
+                                            val progress = if (contentLength > 0) (totalDownloaded.toFloat() / contentLength.toFloat()).coerceIn(0f, 1f) else 0.5f
                                             repository.updateDownloadProgress(
                                                 id = downloadId,
                                                 progress = progress,
@@ -412,40 +419,27 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                             downloadSuccess = targetFile.length() > 0
                         } else {
                             repository.updateDownloadStatus(downloadId, DownloadStatus.FAILED)
-                            _userMessage.emit("Download failed: Server returned HTTP $responseCode ($contentType)")
+                            _userMessage.emit("Download failed: Server returned HTTP $responseCode")
                             if (targetFile.exists()) targetFile.delete()
                             return@launch
                         }
                     } catch (e: Exception) {
                         repository.updateDownloadStatus(downloadId, DownloadStatus.FAILED)
-                        _userMessage.emit("Download network error: ${e.localizedMessage ?: "Failed"}")
+                        _userMessage.emit("Download error: ${e.localizedMessage ?: "Connection interrupted"}")
                         if (targetFile.exists()) targetFile.delete()
                         return@launch
+                    } finally {
+                        activeDownloadJobs.remove(downloadId)
+                        pausedDownloads.remove(downloadId)
                     }
                 } else {
-                    // Fast realistic simulation if offline/mock URL
-                    val steps = 15
-                    for (i in 1..steps) {
-                        delay(150)
-                        val progress = (i.toFloat() / steps.toFloat()).coerceAtMost(1.0f)
-                        val downloaded = (estimatedBytes * progress).toLong()
-                        val speed = "${(2.0 + Math.random() * 1.5).toString().take(4)} MB/s"
-                        repository.updateDownloadProgress(
-                            id = downloadId,
-                            progress = progress,
-                            downloaded = downloaded,
-                            speed = speed,
-                            status = if (progress >= 1.0f) DownloadStatus.COMPLETED else DownloadStatus.DOWNLOADING
-                        )
-                    }
-                    if (!targetFile.exists()) {
-                        targetFile.writeBytes(ByteArray(1024))
-                    }
-                    downloadSuccess = true
+                    repository.updateDownloadStatus(downloadId, DownloadStatus.FAILED)
+                    _userMessage.emit("Unable to download: Invalid web address.")
+                    if (targetFile.exists()) targetFile.delete()
+                    return@launch
                 }
 
                 if (downloadSuccess) {
-                    // Extract duration & metadata asynchronously using MediaMetadataRetriever
                     try {
                         val retriever = android.media.MediaMetadataRetriever()
                         retriever.setDataSource(targetFile.absolutePath)
@@ -477,14 +471,18 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     _userMessage.emit("Download completed and saved into Vault!")
                 }
             }
+
+            activeDownloadJobs[downloadId] = downloadJob
         }
     }
 
     fun pauseResumeDownload(download: VaultDownload) {
         viewModelScope.launch {
             if (download.status == DownloadStatus.DOWNLOADING) {
+                pausedDownloads.add(download.id)
                 repository.updateDownloadStatus(download.id, DownloadStatus.PAUSED)
             } else if (download.status == DownloadStatus.PAUSED) {
+                pausedDownloads.remove(download.id)
                 repository.updateDownloadStatus(download.id, DownloadStatus.DOWNLOADING)
             }
         }
@@ -492,6 +490,20 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelDownload(downloadId: Long) {
         viewModelScope.launch {
+            // Cancel background job and release pause state
+            activeDownloadJobs[downloadId]?.cancel()
+            activeDownloadJobs.remove(downloadId)
+            pausedDownloads.remove(downloadId)
+
+            // Delete partial file from disk
+            allDownloads.value.find { it.id == downloadId }?.let { dl ->
+                try {
+                    val file = File(dl.localPath)
+                    if (file.exists()) file.delete()
+                } catch (_: Exception) {
+                }
+            }
+
             repository.removeDownload(downloadId)
             _userMessage.emit("Download cancelled")
         }
