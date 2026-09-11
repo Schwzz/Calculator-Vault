@@ -57,24 +57,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Auto-Reset to Calculator on Exit observer
-        lifecycle.addObserver(LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                // Do not lock the vault if the activity transition is due to a temporary system picker or share sheet
-                if (vaultViewModel.prefs.resetOnExit && !vaultViewModel.isAwaitingExternalActivity) {
-                    calculatorViewModel.resetKeypad()
-                    calculatorViewModel.refreshState()
-                    navControllerRef?.let { nav ->
-                        if (nav.currentDestination?.route != "calculator") {
-                            nav.navigate("calculator") {
-                                popUpTo(0) { inclusive = true }
-                            }
-                        }
-                    }
-                }
-            }
-        })
-
         setContent {
             val vaultUiState by vaultViewModel.uiState.collectAsStateWithLifecycle()
 
@@ -207,7 +189,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (vaultViewModel.prefs.resetOnExit) {
+        if (vaultViewModel.prefs.resetOnExit && !vaultViewModel.isAwaitingExternalActivity) {
             calculatorViewModel.resetKeypad()
             calculatorViewModel.refreshState()
             try {
@@ -229,19 +211,6 @@ class MainActivity : ComponentActivity() {
             hideRecents = vaultViewModel.prefs.hideRecentsPreview,
             blockScreenshots = vaultViewModel.prefs.blockScreenshots
         )
-        if (vaultViewModel.prefs.resetOnExit) {
-            navControllerRef?.let { nav ->
-                if (nav.currentDestination != null && nav.currentDestination?.route != "calculator") {
-                    calculatorViewModel.resetKeypad()
-                    calculatorViewModel.refreshState()
-                    try {
-                        nav.navigate("calculator") {
-                            popUpTo(0) { inclusive = true }
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
-        }
     }
 }
 

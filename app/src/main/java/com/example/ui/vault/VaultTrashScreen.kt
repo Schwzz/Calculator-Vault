@@ -75,6 +75,8 @@ fun VaultTrashScreen(
     var showEmptyTrashConfirm by remember { mutableStateOf(false) }
     var itemToDeletePermanently by remember { mutableStateOf<VaultItem?>(null) }
     var noteToDeletePermanently by remember { mutableStateOf<VaultNote?>(null) }
+    var itemToRestore by remember { mutableStateOf<VaultItem?>(null) }
+    var noteToRestore by remember { mutableStateOf<VaultNote?>(null) }
 
     val totalTrashed = trashItems.size + trashNotes.size
     val cornerStyle = LocalVaultCornerStyle.current
@@ -210,7 +212,7 @@ fun VaultTrashScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 IconButton(
-                                    onClick = { viewModel.restoreNote(note.id) },
+                                    onClick = { noteToRestore = note },
                                     modifier = Modifier.size(44.dp).testTag("trash_restore_note_${note.id}")
                                 ) {
                                     Icon(Icons.Default.Restore, contentDescription = "Restore", tint = MaterialTheme.colorScheme.primary)
@@ -269,7 +271,7 @@ fun VaultTrashScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 IconButton(
-                                    onClick = { viewModel.restoreItem(item) },
+                                    onClick = { itemToRestore = item },
                                     modifier = Modifier.size(44.dp).testTag("trash_restore_item_${item.id}")
                                 ) {
                                     Icon(
@@ -393,6 +395,76 @@ fun VaultTrashScreen(
             dismissButton = {
                 TextButton(
                     onClick = { noteToDeletePermanently = null },
+                    shape = cornerStyle.buttonShape
+                ) {
+                    Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
+    }
+
+    itemToRestore?.let { item ->
+        AlertDialog(
+            onDismissRequest = { itemToRestore = null },
+            title = { Text("Restore File to Vault?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Restore \"${item.name}\" back to the Vault? It will be recovered from the Trash Bin and placed back in your private Vault.",
+                    color = VaultTextSecondary
+                )
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.restoreItem(item)
+                        itemToRestore = null
+                    },
+                    shape = cornerStyle.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Restore", color = MaterialTheme.colorScheme.onPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { itemToRestore = null },
+                    shape = cornerStyle.buttonShape
+                ) {
+                    Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
+    }
+
+    noteToRestore?.let { note ->
+        AlertDialog(
+            onDismissRequest = { noteToRestore = null },
+            title = { Text("Restore Note to Vault?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Restore \"${note.title}\" back to the Vault? It will be recovered from the Trash Bin and placed back in your private notes.",
+                    color = VaultTextSecondary
+                )
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.restoreNote(note.id)
+                        noteToRestore = null
+                    },
+                    shape = cornerStyle.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Restore", color = MaterialTheme.colorScheme.onPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { noteToRestore = null },
                     shape = cornerStyle.buttonShape
                 ) {
                     Text("Cancel", color = Color(0xFFA0A0A0))

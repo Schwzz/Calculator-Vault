@@ -101,10 +101,10 @@ fun VaultMediaPlayerDialog(
         }
     }
 
-    // Indicator auto-dismiss
+    // Indicator auto-dismiss (1.5s hold feedback)
     LaunchedEffect(gestureIndicatorText) {
         if (gestureIndicatorText != null) {
-            delay(900)
+            delay(1500)
             gestureIndicatorText = null
         }
     }
@@ -213,6 +213,16 @@ fun VaultMediaPlayerDialog(
                                     mediaPlayer?.seekTo(target.toInt())
                                     gestureIndicatorText = "+10s"
                                 }
+                                areControlsVisible = true
+                                lastInteractionTime = System.currentTimeMillis()
+                            },
+                            onLongPress = { offset ->
+                                val isLeftSide = offset.x < size.width / 2
+                                val seekStep = if (isLeftSide) -15_000L else 15_000L
+                                val target = (currentPositionMs + seekStep).coerceIn(0L, totalDurationMs)
+                                currentPositionMs = target
+                                mediaPlayer?.seekTo(target.toInt())
+                                gestureIndicatorText = if (isLeftSide) "◀◀ -15s (Hold Seek)" else "▶▶ +15s (Hold Seek)"
                                 areControlsVisible = true
                                 lastInteractionTime = System.currentTimeMillis()
                             }

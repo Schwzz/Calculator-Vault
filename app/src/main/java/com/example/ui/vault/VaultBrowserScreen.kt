@@ -164,6 +164,8 @@ fun VaultBrowserScreen(
     var detectedVideoTitle by remember { mutableStateOf("Web Video") }
     var showResolutionPicker by remember { mutableStateOf(false) }
     var showClearDataConfirm by remember { mutableStateOf(false) }
+    var customVideoView by remember { mutableStateOf<View?>(null) }
+    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -186,7 +188,11 @@ fun VaultBrowserScreen(
     }
 
     BackHandler {
-        if (showResolutionPicker) {
+        if (customVideoView != null) {
+            customViewCallback?.onCustomViewHidden()
+            customVideoView = null
+            customViewCallback = null
+        } else if (showResolutionPicker) {
             showResolutionPicker = false
         } else if (showTabSwitcher) {
             showTabSwitcher = false
@@ -471,8 +477,8 @@ fun VaultBrowserScreen(
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
-                        // Use software layer type to avoid Mesa DRM rendernode (/dev/dri/renderD128) access failures in virtualized environments
-                        setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                        // Hardware acceleration enabled for high-performance HTML5 video & smooth rendering
+                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
                         settings.apply {
                             javaScriptEnabled = true
@@ -481,7 +487,13 @@ fun VaultBrowserScreen(
                             allowFileAccess = false
                             allowContentAccess = false
                             mediaPlaybackRequiresUserGesture = false
-                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0"
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            setSupportZoom(true)
+                            builtInZoomControls = true
+                            displayZoomControls = false
+                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
                             cacheMode = WebSettings.LOAD_DEFAULT
                         }
 
@@ -574,6 +586,17 @@ fun VaultBrowserScreen(
                                     activeTab.favicon = icon
                                 }
                             }
+
+                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                customVideoView = view
+                                customViewCallback = callback
+                            }
+
+                            override fun onHideCustomView() {
+                                customViewCallback?.onCustomViewHidden()
+                                customVideoView = null
+                                customViewCallback = null
+                            }
                         }
 
                         if (activeTab.url.isNotEmpty()) {
@@ -589,6 +612,16 @@ fun VaultBrowserScreen(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+
+            // Custom Fullscreen Web Video container (e.g. YouTube / HTML5 video fullscreen)
+            if (customVideoView != null) {
+                AndroidView(
+                    factory = { customVideoView!! },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                )
+            }
 
             // Minimal, elegant private browser start page (displayed when active tab URL is empty)
             if (activeTab.url.isEmpty()) {

@@ -172,6 +172,8 @@ fun VaultFilesScreen(
 
     var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
     var selectedFileDetails by remember { mutableStateOf<VaultItem?>(null) }
+    var showUnhideSelectedConfirm by remember { mutableStateOf(false) }
+    var itemToUnhideConfirm by remember { mutableStateOf<VaultItem?>(null) }
 
     val cornerStyle = LocalVaultCornerStyle.current
 
@@ -258,7 +260,7 @@ fun VaultFilesScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickable { viewModel.unhideSelected(context) }
+                                .clickable { showUnhideSelectedConfirm = true }
                                 .padding(8.dp)
                                 .testTag("action_unhide_selected")
                         ) {
@@ -467,7 +469,7 @@ fun VaultFilesScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     Text("Added: ${formatDate(fileItem.createdAt)}", color = VaultTextSecondary, fontSize = 13.sp)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text("Status: Encrypted in Private Sandbox", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                    Text("Status: Secured in App-Private Storage", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
 
                     Spacer(modifier = Modifier.height(20.dp))
 
@@ -477,7 +479,7 @@ fun VaultFilesScreen(
                     ) {
                         TextButton(
                             onClick = {
-                                viewModel.unhideSelected(context)
+                                itemToUnhideConfirm = fileItem
                                 selectedFileDetails = null
                             },
                             shape = cornerStyle.buttonShape
@@ -488,6 +490,72 @@ fun VaultFilesScreen(
                 }
             }
         }
+    }
+
+    if (showUnhideSelectedConfirm) {
+        val count = uiState.selectedItemIds.size
+        AlertDialog(
+            onDismissRequest = { showUnhideSelectedConfirm = false },
+            title = { Text("Unhide $count File(s)?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "These files will be restored and will become visible in your public phone gallery and device storage again.",
+                    color = VaultTextSecondary
+                )
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showUnhideSelectedConfirm = false
+                        viewModel.unhideSelected(context)
+                    }
+                ) {
+                    Text("Unhide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showUnhideSelectedConfirm = false }
+                ) {
+                    Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
+    }
+
+    itemToUnhideConfirm?.let { item ->
+        AlertDialog(
+            onDismissRequest = { itemToUnhideConfirm = null },
+            title = { Text("Unhide File?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Restore \"${item.name}\" to public storage? It will become visible in your device gallery and file manager.",
+                    color = VaultTextSecondary
+                )
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val toUnhide = item
+                        itemToUnhideConfirm = null
+                        viewModel.unhideSingleItem(context, toUnhide) {}
+                    }
+                ) {
+                    Text("Unhide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { itemToUnhideConfirm = null }
+                ) {
+                    Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
     }
 }
 
@@ -784,6 +852,7 @@ fun FullScreenPhotoViewer(
     )
     var areControlsVisible by remember { mutableStateOf(true) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showUnhidePhotoConfirm by remember { mutableStateOf(false) }
     var viewingDetailsPhoto by remember { mutableStateOf<VaultItem?>(null) }
 
     Dialog(
@@ -974,11 +1043,7 @@ fun FullScreenPhotoViewer(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .clickable {
-                                            viewModel.unhideSingleItem(context, currentPhoto) { success ->
-                                                if (success && photos.size <= 1) {
-                                                    onDismiss()
-                                                }
-                                            }
+                                            showUnhidePhotoConfirm = true
                                         }
                                         .padding(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
@@ -1059,6 +1124,35 @@ fun FullScreenPhotoViewer(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", color = VaultTextSecondary)
+                }
+            },
+            containerColor = VaultCardBackground,
+            shape = cornerStyle.dialogShape
+        )
+    }
+
+    if (showUnhidePhotoConfirm && activePhoto != null) {
+        AlertDialog(
+            onDismissRequest = { showUnhidePhotoConfirm = false },
+            title = { Text("Unhide Photo?", color = VaultTextPrimary, fontWeight = FontWeight.Bold) },
+            text = { Text("This photo will be restored and will become visible in your public phone gallery again.", color = VaultTextSecondary) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showUnhidePhotoConfirm = false
+                        viewModel.unhideSingleItem(context, activePhoto) { success ->
+                            if (success && photos.size <= 1) {
+                                onDismiss()
+                            }
+                        }
+                    }
+                ) {
+                    Text("Unhide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnhidePhotoConfirm = false }) {
                     Text("Cancel", color = VaultTextSecondary)
                 }
             },

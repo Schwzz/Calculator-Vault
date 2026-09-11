@@ -96,6 +96,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     var isAwaitingExternalActivity: Boolean = false
         private set
 
+    private val pendingImports = mutableListOf<Pair<VaultItem, java.io.File>>()
+
     fun setAwaitingExternalActivity(awaiting: Boolean) {
         isAwaitingExternalActivity = awaiting
     }
@@ -104,9 +106,29 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         setAwaitingExternalActivity(false)
         viewModelScope.launch {
             if (granted) {
-                _userMessage.emit("Original file(s) removed from public storage. Item is now secured in Vault.")
+                var finalizedCount = 0
+                val toFinalize = synchronized(pendingImports) {
+                    val list = pendingImports.toList()
+                    pendingImports.clear()
+                    list
+                }
+                toFinalize.forEach { (item, stagedFile) ->
+                    val finalized = repository.finalizePendingImport(item, stagedFile)
+                    if (finalized != null) finalizedCount++
+                }
+                if (finalizedCount > 0) {
+                    _userMessage.emit("Original removed from Gallery. $finalizedCount file(s) secured in Vault.")
+                }
             } else {
-                _userMessage.emit("File secured in Vault, but original was not removed from Gallery.")
+                val toCancel = synchronized(pendingImports) {
+                    val list = pendingImports.toList()
+                    pendingImports.clear()
+                    list
+                }
+                toCancel.forEach { (_, stagedFile) ->
+                    repository.cancelPendingImport(stagedFile)
+                }
+                _userMessage.emit("Import cancelled: original file could not be removed from Gallery.")
             }
         }
     }
@@ -217,19 +239,23 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     // Import / Unhide / Delete
     fun importFiles(uris: List<Uri>, context: Context, fallbackType: VaultFileType = VaultFileType.FILE) {
         viewModelScope.launch {
-            var count = 0
+            var immediateCount = 0
             val urisNeedingDeletePermission = mutableListOf<Uri>()
             uris.forEach { uri ->
                 val result = repository.importFile(context, uri, fallbackType)
                 if (result.item != null) {
-                    count++
-                    if (result.pendingDeleteUri != null) {
+                    if (result.pendingDeleteUri != null && result.stagedFile != null) {
+                        synchronized(pendingImports) {
+                            pendingImports.add(result.item to result.stagedFile)
+                        }
                         urisNeedingDeletePermission.add(result.pendingDeleteUri)
+                    } else {
+                        immediateCount++
                     }
                 }
             }
-            if (count > 0) {
-                _userMessage.emit("Successfully imported and secured $count file(s) in Vault")
+            if (immediateCount > 0) {
+                _userMessage.emit("Original removed from Gallery. $immediateCount file(s) secured in Vault.")
             }
             if (urisNeedingDeletePermission.isNotEmpty()) {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
@@ -241,9 +267,27 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                         val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(
                             pendingIntent.intentSender
                         ).build()
+                        setAwaitingExternalActivity(true)
                         _pendingDeleteIntentSender.emit(intentSenderRequest)
                     } catch (e: Exception) {
                         e.printStackTrace()
+                        val toCancel = synchronized(pendingImports) {
+                            val list = pendingImports.toList()
+                            pendingImports.clear()
+                            list
+                        }
+                        toCancel.forEach { (_, stagedFile) ->
+                            repository.cancelPendingImport(stagedFile)
+                        }
+                    }
+                } else {
+                    val toCancel = synchronized(pendingImports) {
+                        val list = pendingImports.toList()
+                        pendingImports.clear()
+                        list
+                    }
+                    toCancel.forEach { (_, stagedFile) ->
+                        repository.cancelPendingImport(stagedFile)
                     }
                 }
             }
