@@ -12,9 +12,12 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -87,6 +90,8 @@ fun VaultMediaPlayerDialog(
 
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var surfaceHolder by remember { mutableStateOf<SurfaceHolder?>(null) }
+    var videoWidth by remember { mutableStateOf(0) }
+    var videoHeight by remember { mutableStateOf(0) }
 
     // Auto-hide controls after 3 seconds of user inactivity
     LaunchedEffect(areControlsVisible, isPlaying, lastInteractionTime) {
@@ -110,8 +115,18 @@ fun VaultMediaPlayerDialog(
         try {
             if (file.exists() && file.length() > 5000) {
                 player.setDataSource(context, Uri.fromFile(file))
+                player.setOnVideoSizeChangedListener { _, width, height ->
+                    if (width > 0 && height > 0) {
+                        videoWidth = width
+                        videoHeight = height
+                    }
+                }
                 player.prepareAsync()
                 player.setOnPreparedListener { mp ->
+                    if (mp.videoWidth > 0 && mp.videoHeight > 0) {
+                        videoWidth = mp.videoWidth
+                        videoHeight = mp.videoHeight
+                    }
                     if (surfaceHolder != null && item.fileType == VaultFileType.VIDEO) {
                         mp.setDisplay(surfaceHolder)
                     }
@@ -233,27 +248,48 @@ fun VaultMediaPlayerDialog(
             ) {
                 // Video Surface
                 if (item.fileType == VaultFileType.VIDEO) {
-                    AndroidView(
-                        factory = { ctx ->
-                            SurfaceView(ctx).apply {
-                                holder.addCallback(object : SurfaceHolder.Callback {
-                                    override fun surfaceCreated(holder: SurfaceHolder) {
-                                        surfaceHolder = holder
-                                        try {
-                                            mediaPlayer?.setDisplay(holder)
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
-                                        }
-                                    }
-                                    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-                                    override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                        surfaceHolder = null
-                                    }
-                                })
+                    BoxWithConstraints(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val videoModifier = if (videoWidth > 0 && videoHeight > 0) {
+                            val videoAspect = videoWidth.toFloat() / videoHeight.toFloat()
+                            val containerAspect = maxWidth.value / maxHeight.value
+                            if (videoAspect > containerAspect) {
+                                Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(videoAspect)
+                            } else {
+                                Modifier
+                                    .fillMaxHeight()
+                                    .aspectRatio(videoAspect)
                             }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        } else {
+                            Modifier.fillMaxSize()
+                        }
+
+                        AndroidView(
+                            factory = { ctx ->
+                                SurfaceView(ctx).apply {
+                                    holder.addCallback(object : SurfaceHolder.Callback {
+                                        override fun surfaceCreated(holder: SurfaceHolder) {
+                                            surfaceHolder = holder
+                                            try {
+                                                mediaPlayer?.setDisplay(holder)
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+                                        }
+                                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                                        override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                            surfaceHolder = null
+                                        }
+                                    })
+                                }
+                            },
+                            modifier = videoModifier
+                        )
+                    }
                 } else {
                     // Audio Waveform Graphic Placeholder
                     Box(

@@ -60,7 +60,8 @@ class MainActivity : ComponentActivity() {
         // Auto-Reset to Calculator on Exit observer
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                if (vaultViewModel.prefs.resetOnExit) {
+                // Do not lock the vault if the activity transition is due to a temporary system picker or share sheet
+                if (vaultViewModel.prefs.resetOnExit && !vaultViewModel.isAwaitingExternalActivity) {
                     calculatorViewModel.resetKeypad()
                     calculatorViewModel.refreshState()
                     navControllerRef?.let { nav ->

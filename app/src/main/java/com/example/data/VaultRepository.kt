@@ -66,42 +66,66 @@ class VaultRepository(
 
                 val vaultDir = File(context.filesDir, "vault_files").apply { if (!exists()) mkdirs() }
                 val ext = if (fileName.contains(".")) fileName.substring(fileName.lastIndexOf(".")) else ""
-                val hiddenFile = File(vaultDir, "${UUID.randomUUID()}$ext")
-
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(hiddenFile).use { output ->
+                
+                // Stage 1: Copy to temporary file
+                val tempFile = File(vaultDir, "${UUID.randomUUID()}.tmp")
+                val inStream = contentResolver.openInputStream(uri) ?: return@withContext ImportResult(item = null)
+                val bytesCopied = inStream.use { input ->
+                    FileOutputStream(tempFile).use { output ->
                         input.copyTo(output)
                     }
                 }
 
-                if (fileSize <= 0) {
-                    fileSize = hiddenFile.length()
+                // Stage 2: Transactional verification of stored file integrity
+                if (!tempFile.exists() || tempFile.length() <= 0L || (fileSize > 0L && bytesCopied != fileSize && bytesCopied <= 0L)) {
+                    tempFile.delete()
+                    return@withContext ImportResult(item = null)
                 }
 
+                val actualSize = tempFile.length()
+                val finalFile = File(vaultDir, "${UUID.randomUUID()}$ext")
+                val renamed = tempFile.renameTo(finalFile)
+                val storedFile = if (renamed) finalFile else tempFile
+
+                // Stage 3: Record item in database
                 val item = VaultItem(
                     name = fileName,
                     originalPath = uri.toString(),
-                    storedPath = hiddenFile.absolutePath,
+                    storedPath = storedFile.absolutePath,
                     fileType = detectedType,
-                    sizeBytes = fileSize,
+                    sizeBytes = actualSize,
                     mimeType = mimeType,
                     createdAt = System.currentTimeMillis()
                 )
                 val id = dao.insertItem(item)
 
-                // Attempt to delete the original source file from MediaStore
+                // Stage 4: Attempt removal of original public file
                 var pendingDeleteUri: Uri? = null
+                var deletedImmediately = false
+
                 try {
-                    val deletedRows = contentResolver.delete(uri, null, null)
-                    if (deletedRows <= 0) {
-                        pendingDeleteUri = uri
+                    if (android.provider.DocumentsContract.isDocumentUri(context, uri)) {
+                        deletedImmediately = android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
                     }
-                } catch (_: SecurityException) {
-                    pendingDeleteUri = uri
                 } catch (_: Exception) {
                 }
 
-                ImportResult(item = item.copy(id = id), pendingDeleteUri = pendingDeleteUri)
+                if (!deletedImmediately) {
+                    try {
+                        val deletedRows = contentResolver.delete(uri, null, null)
+                        if (deletedRows > 0) {
+                            deletedImmediately = true
+                        } else {
+                            pendingDeleteUri = uri
+                        }
+                    } catch (_: SecurityException) {
+                        pendingDeleteUri = uri
+                    } catch (_: Exception) {
+                        pendingDeleteUri = uri
+                    }
+                }
+
+                ImportResult(item = item.copy(id = id), pendingDeleteUri = if (deletedImmediately) null else pendingDeleteUri)
             } catch (e: Exception) {
                 e.printStackTrace()
                 ImportResult(item = null)
@@ -119,55 +143,131 @@ class VaultRepository(
                 }
 
                 val resolver = context.contentResolver
+                val collectionUri = when (item.fileType) {
+                    VaultFileType.PHOTO -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    VaultFileType.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    VaultFileType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                    VaultFileType.FILE -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else null
+                }
+
+                // Duplicate check: Check if identical file already exists in public storage
+                var alreadyInPublicStorage = false
+                if (collectionUri != null) {
+                    try {
+                        val projection = arrayOf(
+                            MediaStore.MediaColumns._ID,
+                            MediaStore.MediaColumns.DISPLAY_NAME,
+                            MediaStore.MediaColumns.SIZE
+                        )
+                        resolver.query(
+                            collectionUri,
+                            projection,
+                            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                            arrayOf(item.name),
+                            null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val sizeCol = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                                val existingSize = if (sizeCol != -1) cursor.getLong(sizeCol) else -1L
+                                if (existingSize == sourceFile.length()) {
+                                    alreadyInPublicStorage = true
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
+                } else {
+                    val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val existingFile = File(publicDir, item.name)
+                    if (existingFile.exists() && existingFile.length() == sourceFile.length()) {
+                        alreadyInPublicStorage = true
+                    }
+                }
+
+                // If identical file already exists in public storage, safely remove vault copy without creating duplicate
+                if (alreadyInPublicStorage) {
+                    sourceFile.delete()
+                    dao.deleteItemsPermanently(listOf(item.id))
+                    return@withContext true
+                }
+
+                // Disambiguate filename if name exists but size is different
+                var restoreDisplayName = item.name
+                if (collectionUri != null) {
+                    var nameConflict = false
+                    try {
+                        resolver.query(
+                            collectionUri,
+                            arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+                            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                            arrayOf(restoreDisplayName),
+                            null
+                        )?.use { cursor ->
+                            if (cursor.count > 0) nameConflict = true
+                        }
+                    } catch (_: Exception) {
+                    }
+                    if (nameConflict) {
+                        val dot = item.name.lastIndexOf('.')
+                        val base = if (dot != -1) item.name.substring(0, dot) else item.name
+                        val ext = if (dot != -1) item.name.substring(dot) else ""
+                        restoreDisplayName = "${base}_restored$ext"
+                    }
+                }
+
                 val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, item.name)
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, restoreDisplayName)
                     put(MediaStore.MediaColumns.MIME_TYPE, if (item.mimeType.isNotEmpty()) item.mimeType else "application/octet-stream")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         put(MediaStore.MediaColumns.IS_PENDING, 1)
                     }
                 }
 
-                val targetUri = when (item.fileType) {
-                    VaultFileType.PHOTO -> resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                    VaultFileType.VIDEO -> resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
-                    VaultFileType.AUDIO -> resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, contentValues)
-                    VaultFileType.FILE -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                        } else {
-                            val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                            val targetFile = File(publicDir, item.name)
-                            sourceFile.copyTo(targetFile, overwrite = true)
-                            null
-                        }
-                    }
-                }
-
+                val targetUri = if (collectionUri != null) resolver.insert(collectionUri, contentValues) else null
                 var bytesCopied = 0L
+                var copySuccessful = false
+
                 if (targetUri != null) {
-                    val outStream = resolver.openOutputStream(targetUri)
-                    if (outStream == null) {
-                        return@withContext false
-                    }
-                    outStream.use { output ->
-                        sourceFile.inputStream().use { inStream ->
-                            bytesCopied = inStream.copyTo(output)
+                    try {
+                        val outStream = resolver.openOutputStream(targetUri)
+                        if (outStream != null) {
+                            outStream.use { output ->
+                                sourceFile.inputStream().use { inStream ->
+                                    bytesCopied = inStream.copyTo(output)
+                                }
+                                output.flush()
+                            }
+                            if (bytesCopied == sourceFile.length() || (sourceFile.length() == 0L && bytesCopied == 0L)) {
+                                copySuccessful = true
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    contentValues.clear()
+                                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                    resolver.update(targetUri, contentValues, null, null)
+                                }
+                            } else {
+                                resolver.delete(targetUri, null, null)
+                            }
                         }
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        contentValues.clear()
-                        contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        resolver.update(targetUri, contentValues, null, null)
+                    } catch (e: Exception) {
+                        try { resolver.delete(targetUri, null, null) } catch (_: Exception) {}
+                        copySuccessful = false
                     }
                 } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && item.fileType == VaultFileType.FILE) {
                     val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                    val targetFile = File(publicDir, item.name)
-                    sourceFile.copyTo(targetFile, overwrite = true)
-                    bytesCopied = targetFile.length()
+                    if (!publicDir.exists()) publicDir.mkdirs()
+                    val targetFile = File(publicDir, restoreDisplayName)
+                    try {
+                        sourceFile.copyTo(targetFile, overwrite = false)
+                        if (targetFile.length() == sourceFile.length()) {
+                            copySuccessful = true
+                        }
+                    } catch (_: Exception) {
+                        copySuccessful = false
+                    }
                 }
 
-                if (bytesCopied > 0 || sourceFile.length() == 0L) {
-                    // Delete private hidden copy and remove from DB only after verified write
+                if (copySuccessful) {
+                    // Only delete private copy and database item after successful verified write
                     sourceFile.delete()
                     dao.deleteItemsPermanently(listOf(item.id))
                     true

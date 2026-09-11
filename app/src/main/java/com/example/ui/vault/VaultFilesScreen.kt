@@ -1,5 +1,6 @@
 package com.example.ui.vault
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -50,9 +51,12 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
@@ -65,6 +69,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.core.content.FileProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -139,6 +144,7 @@ fun VaultFilesScreen(
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
+        viewModel.setAwaitingExternalActivity(false)
         if (uris.isNotEmpty()) {
             viewModel.importFiles(uris, context, categoryType)
         }
@@ -146,12 +152,14 @@ fun VaultFilesScreen(
 
     val deleteIntentSenderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
-    ) {
-        // System deletion intent completed
+    ) { result ->
+        viewModel.setAwaitingExternalActivity(false)
+        viewModel.onDeletePermissionResult(result.resultCode == android.app.Activity.RESULT_OK)
     }
 
     LaunchedEffect(Unit) {
         viewModel.pendingDeleteIntentSender.collect { intentSenderRequest ->
+            viewModel.setAwaitingExternalActivity(true)
             deleteIntentSenderLauncher.launch(intentSenderRequest)
         }
     }
@@ -299,7 +307,10 @@ fun VaultFilesScreen(
         floatingActionButton = {
             if (!uiState.isMultiSelectMode) {
                 FloatingActionButton(
-                    onClick = { filePicker.launch(mimeType) },
+                    onClick = {
+                        viewModel.setAwaitingExternalActivity(true)
+                        filePicker.launch(mimeType)
+                    },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = cornerStyle.fabShape,
@@ -408,6 +419,7 @@ fun VaultFilesScreen(
             FullScreenPhotoViewer(
                 photos = photoList,
                 initialIndex = initialIndex,
+                viewModel = viewModel,
                 onDismiss = { selectedPhotoIndex = null }
             )
         }
@@ -758,15 +770,21 @@ fun rememberVideoThumbnail(videoPath: String): Bitmap? {
 fun FullScreenPhotoViewer(
     photos: List<VaultItem>,
     initialIndex: Int,
+    viewModel: VaultViewModel,
     onDismiss: () -> Unit
 ) {
     if (photos.isEmpty()) return
+
+    val context = LocalContext.current
+    val cornerStyle = LocalVaultCornerStyle.current
 
     val pagerState = rememberPagerState(
         initialPage = initialIndex.coerceIn(0, photos.size - 1),
         pageCount = { photos.size }
     )
     var areControlsVisible by remember { mutableStateOf(true) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var viewingDetailsPhoto by remember { mutableStateOf<VaultItem?>(null) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -784,7 +802,7 @@ fun FullScreenPhotoViewer(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
-                    val photo = photos[page]
+                    val photo = photos.getOrNull(page) ?: return@HorizontalPager
                     var scale by remember { mutableFloatStateOf(1f) }
                     var offset by remember { mutableStateOf(Offset.Zero) }
 
@@ -806,22 +824,29 @@ fun FullScreenPhotoViewer(
                                     }
                                 )
                             }
-                            .pointerInput(Unit) {
-                                detectTransformGestures { _, pan, zoom, _ ->
-                                    val newScale = (scale * zoom).coerceIn(1f, 4f)
-                                    scale = newScale
-                                    if (newScale > 1f) {
-                                        val maxX = 1200f * (newScale - 1f)
-                                        val maxY = 1200f * (newScale - 1f)
-                                        offset = Offset(
-                                            x = (offset.x + pan.x).coerceIn(-maxX, maxX),
-                                            y = (offset.y + pan.y).coerceIn(-maxY, maxY)
-                                        )
-                                    } else {
-                                        offset = Offset.Zero
+                            .then(
+                                if (scale > 1.05f) {
+                                    Modifier.pointerInput(scale) {
+                                        detectTransformGestures { _, pan, zoom, _ ->
+                                            val newScale = (scale * zoom).coerceIn(1f, 4f)
+                                            scale = newScale
+                                            if (newScale > 1.05f) {
+                                                val maxX = 1200f * (newScale - 1f)
+                                                val maxY = 1200f * (newScale - 1f)
+                                                offset = Offset(
+                                                    x = (offset.x + pan.x).coerceIn(-maxX, maxX),
+                                                    y = (offset.y + pan.y).coerceIn(-maxY, maxY)
+                                                )
+                                            } else {
+                                                scale = 1f
+                                                offset = Offset.Zero
+                                            }
+                                        }
                                     }
+                                } else {
+                                    Modifier
                                 }
-                            },
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         val file = File(photo.storedPath)
@@ -860,7 +885,7 @@ fun FullScreenPhotoViewer(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color.Black.copy(alpha = 0.65f))
+                                .background(Color.Black.copy(alpha = 0.70f))
                                 .statusBarsPadding()
                                 .padding(horizontal = 8.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -887,7 +912,7 @@ fun FullScreenPhotoViewer(
                                 )
                                 Text(
                                     text = "${pagerState.currentPage + 1} / ${photos.size}",
-                                    color = Color.White.copy(alpha = 0.7f),
+                                    color = Color.White.copy(alpha = 0.75f),
                                     fontSize = 12.sp
                                 )
                             }
@@ -895,33 +920,218 @@ fun FullScreenPhotoViewer(
                             Spacer(modifier = Modifier.size(48.dp))
                         }
 
-                        // Bottom Bar
+                        // Bottom Functional Controls Bar
                         val currentPhoto = photos.getOrNull(pagerState.currentPage)
                         if (currentPhoto != null) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color.Black.copy(alpha = 0.65f))
+                                    .background(Color.Black.copy(alpha = 0.75f))
                                     .navigationBarsPadding()
-                                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = formatFileSize(currentPhoto.sizeBytes),
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    fontSize = 13.sp
-                                )
-                                Text(
-                                    text = formatDate(currentPhoto.createdAt),
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    fontSize = 13.sp
-                                )
+                                // 1. Share
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clickable {
+                                            try {
+                                                val file = File(currentPhoto.storedPath)
+                                                if (file.exists()) {
+                                                    val shareUri = FileProvider.getUriForFile(
+                                                        context,
+                                                        "${context.packageName}.fileprovider",
+                                                        file
+                                                    )
+                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                        type = currentPhoto.mimeType.ifEmpty { "image/*" }
+                                                        putExtra(Intent.EXTRA_STREAM, shareUri)
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    }
+                                                    viewModel.setAwaitingExternalActivity(true)
+                                                    context.startActivity(Intent.createChooser(shareIntent, "Share Photo"))
+                                                }
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = "Share",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Share", color = Color.White, fontSize = 11.sp)
+                                }
+
+                                // 2. Unhide
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clickable {
+                                            viewModel.unhideSingleItem(context, currentPhoto) { success ->
+                                                if (success && photos.size <= 1) {
+                                                    onDismiss()
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FileDownload,
+                                        contentDescription = "Unhide",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Unhide", color = Color.White, fontSize = 11.sp)
+                                }
+
+                                // 3. Details
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clickable {
+                                            viewingDetailsPhoto = currentPhoto
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "Details",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Details", color = Color.White, fontSize = 11.sp)
+                                }
+
+                                // 4. Delete (with confirmation)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clickable {
+                                            showDeleteConfirm = true
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Delete", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    // Delete Confirmation Dialog
+    val activePhoto = photos.getOrNull(pagerState.currentPage)
+    if (showDeleteConfirm && activePhoto != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Move to Trash?", color = VaultTextPrimary, fontWeight = FontWeight.Bold) },
+            text = { Text("This item will be moved to the Trash Bin.", color = VaultTextSecondary) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        viewModel.moveItemToTrash(activePhoto)
+                        if (photos.size <= 1) {
+                            onDismiss()
+                        }
+                    }
+                ) {
+                    Text("Move to Trash", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", color = VaultTextSecondary)
+                }
+            },
+            containerColor = VaultCardBackground,
+            shape = cornerStyle.dialogShape
+        )
+    }
+
+    // Details Dialog
+    viewingDetailsPhoto?.let { photo ->
+        Dialog(onDismissRequest = { viewingDetailsPhoto = null }) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(cornerStyle.dialogShape),
+                shape = cornerStyle.dialogShape,
+                color = VaultCardBackground,
+                border = BorderStroke(1.dp, VaultCardBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
+                ) {
+                    Text(
+                        text = "File Details",
+                        color = VaultTextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    DetailRow("Name", photo.name)
+                    DetailRow("Type", photo.fileType.name)
+                    DetailRow("Size", formatFileSize(photo.sizeBytes))
+                    DetailRow("Format", photo.mimeType)
+                    DetailRow("Added", formatDate(photo.createdAt))
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { viewingDetailsPhoto = null }) {
+                            Text("Close", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = VaultTextSecondary, fontSize = 13.sp)
+        Text(
+            value,
+            color = VaultTextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 16.dp)
+        )
     }
 }

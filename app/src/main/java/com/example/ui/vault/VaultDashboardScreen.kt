@@ -116,6 +116,7 @@ fun VaultDashboardScreen(
     val generalPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
+        viewModel.setAwaitingExternalActivity(false)
         if (uris.isNotEmpty()) {
             viewModel.importFiles(uris, context, VaultFileType.FILE)
         }
@@ -124,6 +125,7 @@ fun VaultDashboardScreen(
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
+        viewModel.setAwaitingExternalActivity(false)
         if (uris.isNotEmpty()) {
             viewModel.importFiles(uris, context, VaultFileType.PHOTO)
         }
@@ -132,6 +134,7 @@ fun VaultDashboardScreen(
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
+        viewModel.setAwaitingExternalActivity(false)
         if (uris.isNotEmpty()) {
             viewModel.importFiles(uris, context, VaultFileType.VIDEO)
         }
@@ -140,8 +143,23 @@ fun VaultDashboardScreen(
     val audioPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
+        viewModel.setAwaitingExternalActivity(false)
         if (uris.isNotEmpty()) {
             viewModel.importFiles(uris, context, VaultFileType.AUDIO)
+        }
+    }
+
+    val deleteIntentSenderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        viewModel.setAwaitingExternalActivity(false)
+        viewModel.onDeletePermissionResult(result.resultCode == android.app.Activity.RESULT_OK)
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.pendingDeleteIntentSender.collect { intentSenderRequest ->
+            viewModel.setAwaitingExternalActivity(true)
+            deleteIntentSenderLauncher.launch(intentSenderRequest)
         }
     }
 
@@ -259,6 +277,7 @@ fun VaultDashboardScreen(
                         leadingIcon = { Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = {
                             showFabMenu = false
+                            viewModel.setAwaitingExternalActivity(true)
                             photoPicker.launch("image/*")
                         }
                     )
@@ -267,6 +286,7 @@ fun VaultDashboardScreen(
                         leadingIcon = { Icon(Icons.Default.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = {
                             showFabMenu = false
+                            viewModel.setAwaitingExternalActivity(true)
                             videoPicker.launch("video/*")
                         }
                     )
@@ -275,6 +295,7 @@ fun VaultDashboardScreen(
                         leadingIcon = { Icon(Icons.Default.Audiotrack, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = {
                             showFabMenu = false
+                            viewModel.setAwaitingExternalActivity(true)
                             audioPicker.launch("audio/*")
                         }
                     )
@@ -283,6 +304,7 @@ fun VaultDashboardScreen(
                         leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = {
                             showFabMenu = false
+                            viewModel.setAwaitingExternalActivity(true)
                             generalPicker.launch("*/*")
                         }
                     )

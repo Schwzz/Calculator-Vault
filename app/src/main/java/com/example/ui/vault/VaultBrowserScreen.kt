@@ -253,10 +253,12 @@ fun VaultBrowserScreen(
                     ) {
                         IconButton(
                             onClick = onNavigateBack,
-                            modifier = Modifier.testTag("browser_back_to_vault_button")
+                            modifier = Modifier.size(40.dp).testTag("browser_back_to_vault_button")
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Vault", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Vault", tint = Color.White, modifier = Modifier.size(22.dp))
                         }
+
+                        Spacer(modifier = Modifier.width(4.dp))
 
                         // Search & URL Input Field - Decoupled state, IME Search, Favicon support, No text cutoff
                         BasicTextField(
@@ -286,15 +288,15 @@ fun VaultBrowserScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(44.dp)
-                                        .clip(RoundedCornerShape(22.dp))
+                                        .height(42.dp)
+                                        .clip(RoundedCornerShape(21.dp))
                                         .background(VaultBackground)
                                         .border(
                                             width = 1.dp,
                                             color = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultCardBorder,
-                                            shape = RoundedCornerShape(22.dp)
+                                            shape = RoundedCornerShape(21.dp)
                                         )
-                                        .padding(horizontal = 12.dp),
+                                        .padding(horizontal = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     val fav = currentFavicon
@@ -307,7 +309,7 @@ fun VaultBrowserScreen(
                                                 .clip(CircleShape)
                                                 .testTag("browser_favicon")
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
                                     } else {
                                         Icon(
                                             imageVector = Icons.Default.Search,
@@ -315,7 +317,7 @@ fun VaultBrowserScreen(
                                             tint = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultTextSecondary,
                                             modifier = Modifier.size(18.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
                                     }
 
                                     Box(
@@ -324,9 +326,9 @@ fun VaultBrowserScreen(
                                     ) {
                                         if (inputUrl.isEmpty()) {
                                             Text(
-                                                text = "Search (${vaultUiState.searchEngine}) or enter address",
+                                                text = "Search or enter address",
                                                 color = VaultTextSecondary,
-                                                fontSize = 13.sp,
+                                                fontSize = 12.5.sp,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -358,7 +360,7 @@ fun VaultBrowserScreen(
                         // Tab Counter Button
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(32.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .border(1.5.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
                                 .clickable { showTabSwitcher = true }
@@ -368,26 +370,27 @@ fun VaultBrowserScreen(
                             Text(
                                 text = tabs.size.toString(),
                                 color = Color.White,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
                         IconButton(
                             onClick = onOpenDownloads,
-                            modifier = Modifier.testTag("browser_downloads_button")
+                            modifier = Modifier.size(36.dp).testTag("browser_downloads_button")
                         ) {
-                            Icon(Icons.Default.Download, contentDescription = "Downloads", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Download, contentDescription = "Downloads", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                         }
 
                         IconButton(
                             onClick = { showClearDataConfirm = true },
-                            modifier = Modifier.testTag("browser_clear_data_button")
+                            modifier = Modifier.size(36.dp).testTag("browser_clear_data_button")
                         ) {
                             Icon(
                                 Icons.Outlined.DeleteOutline,
                                 contentDescription = "Clear Browser Data",
-                                tint = MaterialTheme.colorScheme.error
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }

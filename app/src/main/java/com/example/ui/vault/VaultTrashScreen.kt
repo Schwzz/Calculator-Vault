@@ -73,6 +73,8 @@ fun VaultTrashScreen(
     val trashItems by viewModel.trashItems.collectAsStateWithLifecycle()
     val trashNotes by viewModel.trashNotes.collectAsStateWithLifecycle()
     var showEmptyTrashConfirm by remember { mutableStateOf(false) }
+    var itemToDeletePermanently by remember { mutableStateOf<VaultItem?>(null) }
+    var noteToDeletePermanently by remember { mutableStateOf<VaultNote?>(null) }
 
     val totalTrashed = trashItems.size + trashNotes.size
     val cornerStyle = LocalVaultCornerStyle.current
@@ -214,7 +216,7 @@ fun VaultTrashScreen(
                                     Icon(Icons.Default.Restore, contentDescription = "Restore", tint = MaterialTheme.colorScheme.primary)
                                 }
                                 IconButton(
-                                    onClick = { viewModel.deleteNotePermanently(note.id) },
+                                    onClick = { noteToDeletePermanently = note },
                                     modifier = Modifier.size(44.dp).testTag("trash_delete_note_${note.id}")
                                 ) {
                                     Icon(Icons.Default.DeleteForever, contentDescription = "Delete Forever", tint = Color(0xFFEF4444))
@@ -277,7 +279,7 @@ fun VaultTrashScreen(
                                     )
                                 }
                                 IconButton(
-                                    onClick = { viewModel.deleteItemPermanently(item) },
+                                    onClick = { itemToDeletePermanently = item },
                                     modifier = Modifier.size(44.dp).testTag("trash_delete_permanently_${item.id}")
                                 ) {
                                     Icon(
@@ -321,6 +323,76 @@ fun VaultTrashScreen(
             dismissButton = {
                 TextButton(
                     onClick = { showEmptyTrashConfirm = false },
+                    shape = cornerStyle.buttonShape
+                ) {
+                    Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
+    }
+
+    itemToDeletePermanently?.let { item ->
+        AlertDialog(
+            onDismissRequest = { itemToDeletePermanently = null },
+            title = { Text("Delete Permanently?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Are you sure you want to permanently delete \"${item.name}\"? This action is irreversible and the file will be deleted forever.",
+                    color = VaultTextSecondary
+                )
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteItemPermanently(item)
+                        itemToDeletePermanently = null
+                    },
+                    shape = cornerStyle.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                ) {
+                    Text("Delete Forever", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { itemToDeletePermanently = null },
+                    shape = cornerStyle.buttonShape
+                ) {
+                    Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
+    }
+
+    noteToDeletePermanently?.let { note ->
+        AlertDialog(
+            onDismissRequest = { noteToDeletePermanently = null },
+            title = { Text("Delete Note Permanently?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Are you sure you want to permanently delete \"${note.title}\"? This action cannot be undone.",
+                    color = VaultTextSecondary
+                )
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteNotePermanently(note.id)
+                        noteToDeletePermanently = null
+                    },
+                    shape = cornerStyle.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                ) {
+                    Text("Delete Forever", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { noteToDeletePermanently = null },
                     shape = cornerStyle.buttonShape
                 ) {
                     Text("Cancel", color = Color(0xFFA0A0A0))

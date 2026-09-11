@@ -91,6 +91,26 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingDeleteIntentSender = MutableSharedFlow<androidx.activity.result.IntentSenderRequest>()
     val pendingDeleteIntentSender: SharedFlow<androidx.activity.result.IntentSenderRequest> = _pendingDeleteIntentSender.asSharedFlow()
 
+    // Temporary flag to prevent auto-reset when launching external system activities (photo picker, document picker, share sheet, media delete confirmation)
+    @Volatile
+    var isAwaitingExternalActivity: Boolean = false
+        private set
+
+    fun setAwaitingExternalActivity(awaiting: Boolean) {
+        isAwaitingExternalActivity = awaiting
+    }
+
+    fun onDeletePermissionResult(granted: Boolean) {
+        setAwaitingExternalActivity(false)
+        viewModelScope.launch {
+            if (granted) {
+                _userMessage.emit("Original file(s) removed from public storage. Item is now secured in Vault.")
+            } else {
+                _userMessage.emit("File secured in Vault, but original was not removed from Gallery.")
+            }
+        }
+    }
+
     private val activeDownloadJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
     private val pausedDownloads = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
@@ -242,6 +262,25 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             }
             clearSelection()
             _userMessage.emit("Restored and unhid $unhiddenCount item(s) to public storage")
+        }
+    }
+
+    fun unhideSingleItem(context: Context, item: VaultItem, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val success = repository.unhideItem(context, item)
+            if (success) {
+                _userMessage.emit("Restored ${item.name} to public storage")
+            } else {
+                _userMessage.emit("Failed to restore ${item.name}")
+            }
+            onResult(success)
+        }
+    }
+
+    fun moveItemToTrash(item: VaultItem) {
+        viewModelScope.launch {
+            repository.moveItemsToTrash(listOf(item.id))
+            _userMessage.emit("Moved ${item.name} to Trash Bin")
         }
     }
 
