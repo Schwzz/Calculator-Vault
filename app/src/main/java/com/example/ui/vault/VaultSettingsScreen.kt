@@ -582,7 +582,7 @@ fun VaultSettingsScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = "A covert photo, video, and files vault disguised behind a fully functional calculator with private browser, media downloader, and local encryption.",
+                            text = "A covert photo, video, and files vault disguised behind a fully functional calculator with private browser, media downloader, and app-isolated local storage.",
                             color = VaultTextSecondary,
                             fontSize = 12.sp,
                             lineHeight = 17.sp
