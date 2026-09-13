@@ -1,12 +1,17 @@
 package com.example.data
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Log
+import android.webkit.MimeTypeMap
 import com.example.model.DownloadStatus
 import com.example.model.VaultDownload
 import com.example.model.VaultFileType
@@ -22,8 +27,8 @@ import java.util.UUID
 
 data class ImportResult(
     val item: VaultItem?,
+    val originalDeleted: Boolean = false,
     val pendingDeleteUri: Uri? = null,
-    val stagedFile: File? = null,
     val errorMessage: String? = null
 )
 
@@ -42,105 +47,174 @@ class VaultRepository(
     fun getTotalSizeByType(type: VaultFileType): Flow<Long> = dao.getTotalSizeByType(type)
     fun getTotalVaultSize(): Flow<Long> = dao.getTotalActiveVaultSize()
 
+    private fun resolveToMediaStoreUri(context: Context, uri: Uri): Uri? {
+        if (uri.authority == "media" || uri.toString().startsWith("content://media/")) {
+            return uri
+        }
+        if (DocumentsContract.isDocumentUri(context, uri)) {
+            val docId = DocumentsContract.getDocumentId(uri)
+            val authority = uri.authority
+            if (authority == "com.android.providers.media.documents") {
+                val parts = docId.split(":")
+                if (parts.size >= 2) {
+                    val type = parts[0]
+                    val id = parts[1].toLongOrNull() ?: return null
+                    return when (type) {
+                        "image" -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                        "video" -> ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                        "audio" -> ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                        else -> ContentUris.withAppendedId(MediaStore.Files.getContentUri("external"), id)
+                    }
+                }
+            }
+        }
+        return null
+    }
+
     suspend fun importFile(context: Context, uri: Uri, fallbackType: VaultFileType = VaultFileType.FILE): ImportResult {
         return withContext(Dispatchers.IO) {
             val vaultDir = File(context.filesDir, "vault_files").apply { if (!exists()) mkdirs() }
             var tempFile: File? = null
             try {
                 val contentResolver = context.contentResolver
-                var fileName = "hidden_file_${System.currentTimeMillis()}"
+                var fileName = "vault_file_${System.currentTimeMillis()}"
                 var fileSize = 0L
-                var mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+                var mimeType = contentResolver.getType(uri) ?: ""
 
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (cursor.moveToFirst()) {
-                        if (nameIndex != -1) fileName = cursor.getString(nameIndex) ?: fileName
-                        if (sizeIndex != -1) fileSize = cursor.getLong(sizeIndex)
+                // Step 1: Query content resolver for metadata
+                try {
+                    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (cursor.moveToFirst()) {
+                            if (nameIndex != -1) {
+                                val name = cursor.getString(nameIndex)
+                                if (!name.isNullOrBlank()) fileName = name
+                            }
+                            if (sizeIndex != -1) fileSize = cursor.getLong(sizeIndex)
+                        }
                     }
-                }
-
-                val detectedType = when {
-                    mimeType.startsWith("image/") || fileName.endsWith(".jpg", true) || fileName.endsWith(".png", true) || fileName.endsWith(".jpeg", true) || fileName.endsWith(".webp", true) -> VaultFileType.PHOTO
-                    mimeType.startsWith("video/") || fileName.endsWith(".mp4", true) || fileName.endsWith(".mkv", true) || fileName.endsWith(".webm", true) -> VaultFileType.VIDEO
-                    mimeType.startsWith("audio/") || fileName.endsWith(".mp3", true) || fileName.endsWith(".wav", true) || fileName.endsWith(".m4a", true) -> VaultFileType.AUDIO
-                    else -> fallbackType
+                } catch (e: Exception) {
+                    Log.w("VaultRepository", "Could not query URI metadata: ${e.message}")
                 }
 
                 val ext = if (fileName.contains(".")) fileName.substring(fileName.lastIndexOf(".")) else ""
-                
-                // Stage 1: Copy source into temporary Vault file
+                if (mimeType.isBlank() && ext.isNotEmpty()) {
+                    val cleanExt = ext.removePrefix(".").lowercase()
+                    mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(cleanExt) ?: ""
+                }
+
+                val detectedType = when {
+                    mimeType.startsWith("image/") || ext.matches(Regex("\\.(jpg|jpeg|png|webp|gif|bmp|heic)", RegexOption.IGNORE_CASE)) -> VaultFileType.PHOTO
+                    mimeType.startsWith("video/") || ext.matches(Regex("\\.(mp4|mkv|webm|mov|3gp|avi)", RegexOption.IGNORE_CASE)) -> VaultFileType.VIDEO
+                    mimeType.startsWith("audio/") || ext.matches(Regex("\\.(mp3|wav|m4a|aac|flac|ogg)", RegexOption.IGNORE_CASE)) -> VaultFileType.AUDIO
+                    else -> fallbackType
+                }
+
+                if (mimeType.isBlank()) {
+                    mimeType = when (detectedType) {
+                        VaultFileType.PHOTO -> "image/jpeg"
+                        VaultFileType.VIDEO -> "video/mp4"
+                        VaultFileType.AUDIO -> "audio/mpeg"
+                        VaultFileType.FILE -> "application/octet-stream"
+                    }
+                }
+
+                // Step 2: Stage source into temporary Vault file
                 val staged = File(vaultDir, "${UUID.randomUUID()}.tmp")
                 tempFile = staged
-                val inStream = contentResolver.openInputStream(uri) ?: run {
-                    staged.delete()
-                    return@withContext ImportResult(item = null, errorMessage = "Could not open source")
+                val inStream = try {
+                    contentResolver.openInputStream(uri)
+                } catch (e: Exception) {
+                    Log.e("VaultRepository", "Failed to open inputStream for $uri", e)
+                    null
                 }
+
+                if (inStream == null) {
+                    staged.delete()
+                    return@withContext ImportResult(item = null, errorMessage = "Could not open source file")
+                }
+
                 val bytesCopied = inStream.use { input ->
                     FileOutputStream(staged).use { output ->
                         input.copyTo(output)
                     }
                 }
 
-                // Stage 2: Transactional verification of stored file integrity
+                // Step 3: Transactional verification of stored file integrity
                 if (!staged.exists() || staged.length() <= 0L || (fileSize > 0L && bytesCopied != fileSize && bytesCopied <= 0L)) {
                     staged.delete()
-                    return@withContext ImportResult(item = null, errorMessage = "Verification failed")
+                    return@withContext ImportResult(item = null, errorMessage = "File integrity verification failed")
                 }
 
                 val actualSize = staged.length()
                 val finalFile = File(vaultDir, "${UUID.randomUUID()}$ext")
+                val renamed = staged.renameTo(finalFile)
+                val storedFile = if (renamed) finalFile else staged
+                if (!storedFile.exists() || storedFile.length() <= 0L) {
+                    storedFile.delete()
+                    return@withContext ImportResult(item = null, errorMessage = "Could not store file in Vault")
+                }
 
-                // Stage 3: Attempt immediate removal of original public source
-                var deletedImmediately = false
+                // Extract video duration if it's a video
+                var durationMs = 0L
+                if (detectedType == VaultFileType.VIDEO) {
+                    try {
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(storedFile.absolutePath)
+                        val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        durationMs = time?.toLongOrNull() ?: 0L
+                        retriever.release()
+                    } catch (_: Exception) {}
+                }
+
+                // Step 4: Finalize database record once Vault copy is established
+                val item = VaultItem(
+                    name = fileName,
+                    originalPath = uri.toString(),
+                    storedPath = storedFile.absolutePath,
+                    fileType = detectedType,
+                    sizeBytes = actualSize,
+                    mimeType = mimeType,
+                    durationMs = durationMs,
+                    createdAt = System.currentTimeMillis()
+                )
+                val id = dao.insertItem(item)
+                val insertedItem = item.copy(id = id)
+
+                // Step 5: Only AFTER successful verification and Vault establishment, attempt to remove original
+                var originalDeleted = false
                 try {
-                    if (android.provider.DocumentsContract.isDocumentUri(context, uri)) {
-                        deletedImmediately = android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
+                    if (DocumentsContract.isDocumentUri(context, uri)) {
+                        originalDeleted = DocumentsContract.deleteDocument(contentResolver, uri)
                     }
                 } catch (_: Exception) {}
 
-                if (!deletedImmediately) {
+                val resolvedMediaStoreUri = resolveToMediaStoreUri(context, uri)
+                if (!originalDeleted && resolvedMediaStoreUri != null) {
                     try {
-                        val deletedRows = contentResolver.delete(uri, null, null)
+                        val deletedRows = contentResolver.delete(resolvedMediaStoreUri, null, null)
                         if (deletedRows > 0) {
-                            deletedImmediately = true
+                            originalDeleted = true
                         }
                     } catch (_: Exception) {}
                 }
 
-                if (deletedImmediately) {
-                    // Source removed immediately! Finalize import: move file & insert into DB
-                    val renamed = staged.renameTo(finalFile)
-                    val storedFile = if (renamed) finalFile else staged
-                    val item = VaultItem(
-                        name = fileName,
-                        originalPath = uri.toString(),
-                        storedPath = storedFile.absolutePath,
-                        fileType = detectedType,
-                        sizeBytes = actualSize,
-                        mimeType = mimeType,
-                        createdAt = System.currentTimeMillis()
-                    )
-                    val id = dao.insertItem(item)
-                    ImportResult(item = item.copy(id = id), pendingDeleteUri = null)
+                if (!originalDeleted && !DocumentsContract.isDocumentUri(context, uri)) {
+                    try {
+                        val deletedRows = contentResolver.delete(uri, null, null)
+                        if (deletedRows > 0) {
+                            originalDeleted = true
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                if (originalDeleted) {
+                    ImportResult(item = insertedItem, originalDeleted = true)
+                } else if (resolvedMediaStoreUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    ImportResult(item = insertedItem, originalDeleted = false, pendingDeleteUri = resolvedMediaStoreUri)
                 } else {
-                    // Public source requires user permission to delete (Android MediaStore delete request)
-                    // DO NOT insert into DB yet to avoid duplicates. Keep staged file pending confirmation.
-                    val pendingItem = VaultItem(
-                        name = fileName,
-                        originalPath = uri.toString(),
-                        storedPath = finalFile.absolutePath,
-                        fileType = detectedType,
-                        sizeBytes = actualSize,
-                        mimeType = mimeType,
-                        createdAt = System.currentTimeMillis()
-                    )
-                    ImportResult(
-                        item = pendingItem,
-                        pendingDeleteUri = uri,
-                        stagedFile = staged
-                    )
+                    ImportResult(item = insertedItem, originalDeleted = false, pendingDeleteUri = null)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -150,28 +224,13 @@ class VaultRepository(
         }
     }
 
-    suspend fun finalizePendingImport(pendingItem: VaultItem, stagedFile: File): VaultItem? {
-        return withContext(Dispatchers.IO) {
-            try {
-                val finalFile = File(pendingItem.storedPath)
-                val moved = stagedFile.renameTo(finalFile)
-                val storedFile = if (moved) finalFile else stagedFile
-                val itemToInsert = pendingItem.copy(storedPath = storedFile.absolutePath)
-                val id = dao.insertItem(itemToInsert)
-                itemToInsert.copy(id = id)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                stagedFile.delete()
-                null
-            }
-        }
-    }
-
-    suspend fun cancelPendingImport(stagedFile: File?) {
+    suspend fun renameItem(id: Long, newName: String) {
         withContext(Dispatchers.IO) {
-            try {
-                stagedFile?.delete()
-            } catch (_: Exception) {}
+            val item = dao.getItemById(id) ?: return@withContext
+            val trimmed = newName.trim()
+            if (trimmed.isNotEmpty()) {
+                dao.updateItem(item.copy(name = trimmed))
+            }
         }
     }
 

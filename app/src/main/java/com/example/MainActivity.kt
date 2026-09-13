@@ -179,6 +179,7 @@ class MainActivity : ComponentActivity() {
                     vaultUiState.currentPlayingItem?.let { playingItem ->
                         VaultMediaPlayerDialog(
                             item = playingItem,
+                            viewModel = vaultViewModel,
                             onDismiss = { vaultViewModel.closeMediaPlayer() }
                         )
                     }

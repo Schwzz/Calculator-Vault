@@ -79,6 +79,7 @@ fun VaultNotesScreen(
     var searchQuery by remember { mutableStateOf("") }
     var noteToEdit by remember { mutableStateOf<VaultNote?>(null) }
     var isCreatingNewNote by remember { mutableStateOf(false) }
+    var noteToTrash by remember { mutableStateOf<VaultNote?>(null) }
 
     val filteredNotes = remember(notes, searchQuery) {
         if (searchQuery.isBlank()) notes
@@ -245,8 +246,8 @@ fun VaultNotesScreen(
                                         modifier = Modifier.weight(1f)
                                     )
                                     IconButton(
-                                        onClick = { viewModel.trashNote(note.id) },
-                                        modifier = Modifier.size(28.dp)
+                                        onClick = { noteToTrash = note },
+                                        modifier = Modifier.size(28.dp).testTag("trash_note_button_${note.id}")
                                     ) {
                                         Icon(
                                             Icons.Default.Delete,
@@ -404,5 +405,23 @@ fun VaultNotesScreen(
                 }
             }
         }
+    }
+
+    noteToTrash?.let { note ->
+        VaultConfirmationDialog(
+            title = "Move to Trash?",
+            message = "Move \"${note.title}\" to the Trash Bin? You can restore it later.",
+            confirmText = "Move to Trash",
+            isDestructive = true,
+            confirmTestTag = "confirm_trash_note",
+            cancelTestTag = "cancel_trash_note",
+            onConfirm = {
+                viewModel.trashNote(note.id)
+                noteToTrash = null
+            },
+            onDismiss = {
+                noteToTrash = null
+            }
+        )
     }
 }

@@ -173,7 +173,9 @@ fun VaultFilesScreen(
     var selectedPhotoIndex by remember { mutableStateOf<Int?>(null) }
     var selectedFileDetails by remember { mutableStateOf<VaultItem?>(null) }
     var showUnhideSelectedConfirm by remember { mutableStateOf(false) }
+    var showTrashSelectedConfirm by remember { mutableStateOf(false) }
     var itemToUnhideConfirm by remember { mutableStateOf<VaultItem?>(null) }
+    var itemToTrashConfirm by remember { mutableStateOf<VaultItem?>(null) }
 
     val cornerStyle = LocalVaultCornerStyle.current
 
@@ -284,7 +286,7 @@ fun VaultFilesScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickable { viewModel.moveSelectedToTrash() }
+                                .clickable { showTrashSelectedConfirm = true }
                                 .padding(8.dp)
                                 .testTag("action_delete_selected")
                         ) {
@@ -479,6 +481,16 @@ fun VaultFilesScreen(
                     ) {
                         TextButton(
                             onClick = {
+                                itemToTrashConfirm = fileItem
+                                selectedFileDetails = null
+                            },
+                            shape = cornerStyle.buttonShape
+                        ) {
+                            Text("Move to Trash", color = Color(0xFFEF4444))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = {
                                 itemToUnhideConfirm = fileItem
                                 selectedFileDetails = null
                             },
@@ -494,66 +506,76 @@ fun VaultFilesScreen(
 
     if (showUnhideSelectedConfirm) {
         val count = uiState.selectedItemIds.size
-        AlertDialog(
-            onDismissRequest = { showUnhideSelectedConfirm = false },
-            title = { Text("Unhide $count File(s)?", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "These files will be restored and will become visible in your public phone gallery and device storage again.",
-                    color = VaultTextSecondary
-                )
+        VaultConfirmationDialog(
+            title = "Unhide $count File(s)?",
+            message = "These files will be restored and will become visible in your public phone gallery and device storage again.",
+            confirmText = "Unhide",
+            isDestructive = false,
+            confirmTestTag = "confirm_unhide_selected",
+            cancelTestTag = "cancel_unhide_selected",
+            onConfirm = {
+                showUnhideSelectedConfirm = false
+                viewModel.unhideSelected(context)
             },
-            shape = cornerStyle.dialogShape,
-            containerColor = VaultCardBackground,
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showUnhideSelectedConfirm = false
-                        viewModel.unhideSelected(context)
-                    }
-                ) {
-                    Text("Unhide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
+            onDismiss = {
+                showUnhideSelectedConfirm = false
+            }
+        )
+    }
+
+    if (showTrashSelectedConfirm) {
+        val count = uiState.selectedItemIds.size
+        VaultConfirmationDialog(
+            title = "Move $count File(s) to Trash?",
+            message = "Selected files will be moved to the Trash Bin. You can restore them later or delete them permanently.",
+            confirmText = "Move to Trash",
+            isDestructive = true,
+            confirmTestTag = "confirm_trash_selected",
+            cancelTestTag = "cancel_trash_selected",
+            onConfirm = {
+                showTrashSelectedConfirm = false
+                viewModel.moveSelectedToTrash()
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { showUnhideSelectedConfirm = false }
-                ) {
-                    Text("Cancel", color = Color(0xFFA0A0A0))
-                }
+            onDismiss = {
+                showTrashSelectedConfirm = false
             }
         )
     }
 
     itemToUnhideConfirm?.let { item ->
-        AlertDialog(
-            onDismissRequest = { itemToUnhideConfirm = null },
-            title = { Text("Unhide File?", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "Restore \"${item.name}\" to public storage? It will become visible in your device gallery and file manager.",
-                    color = VaultTextSecondary
-                )
+        VaultConfirmationDialog(
+            title = "Unhide File?",
+            message = "Restore \"${item.name}\" to public storage? It will become visible in your device gallery and file manager.",
+            confirmText = "Unhide",
+            isDestructive = false,
+            confirmTestTag = "confirm_unhide_single",
+            cancelTestTag = "cancel_unhide_single",
+            onConfirm = {
+                val toUnhide = item
+                itemToUnhideConfirm = null
+                viewModel.unhideSingleItem(context, toUnhide) {}
             },
-            shape = cornerStyle.dialogShape,
-            containerColor = VaultCardBackground,
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val toUnhide = item
-                        itemToUnhideConfirm = null
-                        viewModel.unhideSingleItem(context, toUnhide) {}
-                    }
-                ) {
-                    Text("Unhide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
+            onDismiss = {
+                itemToUnhideConfirm = null
+            }
+        )
+    }
+
+    itemToTrashConfirm?.let { item ->
+        VaultConfirmationDialog(
+            title = "Move to Trash?",
+            message = "Move \"${item.name}\" to the Trash Bin? You can restore it later.",
+            confirmText = "Move to Trash",
+            isDestructive = true,
+            confirmTestTag = "confirm_trash_single",
+            cancelTestTag = "cancel_trash_single",
+            onConfirm = {
+                val toTrash = item
+                itemToTrashConfirm = null
+                viewModel.moveItemToTrash(toTrash)
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { itemToUnhideConfirm = null }
-                ) {
-                    Text("Cancel", color = Color(0xFFA0A0A0))
-                }
+            onDismiss = {
+                itemToTrashConfirm = null
             }
         )
     }

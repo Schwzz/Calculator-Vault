@@ -96,8 +96,6 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     var isAwaitingExternalActivity: Boolean = false
         private set
 
-    private val pendingImports = mutableListOf<Pair<VaultItem, java.io.File>>()
-
     fun setAwaitingExternalActivity(awaiting: Boolean) {
         isAwaitingExternalActivity = awaiting
     }
@@ -106,29 +104,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         setAwaitingExternalActivity(false)
         viewModelScope.launch {
             if (granted) {
-                var finalizedCount = 0
-                val toFinalize = synchronized(pendingImports) {
-                    val list = pendingImports.toList()
-                    pendingImports.clear()
-                    list
-                }
-                toFinalize.forEach { (item, stagedFile) ->
-                    val finalized = repository.finalizePendingImport(item, stagedFile)
-                    if (finalized != null) finalizedCount++
-                }
-                if (finalizedCount > 0) {
-                    _userMessage.emit("Original removed from Gallery. $finalizedCount file(s) secured in Vault.")
-                }
+                _userMessage.emit("Original removed from Gallery. File(s) secured in Vault.")
             } else {
-                val toCancel = synchronized(pendingImports) {
-                    val list = pendingImports.toList()
-                    pendingImports.clear()
-                    list
-                }
-                toCancel.forEach { (_, stagedFile) ->
-                    repository.cancelPendingImport(stagedFile)
-                }
-                _userMessage.emit("Import cancelled: original file could not be removed from Gallery.")
+                _userMessage.emit("File(s) secured in Vault. Original was not removed from Gallery (permission denied).")
             }
         }
     }
@@ -239,58 +217,61 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     // Import / Unhide / Delete
     fun importFiles(uris: List<Uri>, context: Context, fallbackType: VaultFileType = VaultFileType.FILE) {
         viewModelScope.launch {
-            var immediateCount = 0
+            var successCount = 0
+            var originalDeletedCount = 0
             val urisNeedingDeletePermission = mutableListOf<Uri>()
+            var failedOriginalDeleteCount = 0
+            var errorMessage: String? = null
+
             uris.forEach { uri ->
                 val result = repository.importFile(context, uri, fallbackType)
                 if (result.item != null) {
-                    if (result.pendingDeleteUri != null && result.stagedFile != null) {
-                        synchronized(pendingImports) {
-                            pendingImports.add(result.item to result.stagedFile)
-                        }
+                    successCount++
+                    if (result.originalDeleted) {
+                        originalDeletedCount++
+                    } else if (result.pendingDeleteUri != null) {
                         urisNeedingDeletePermission.add(result.pendingDeleteUri)
                     } else {
-                        immediateCount++
-                    }
-                }
-            }
-            if (immediateCount > 0) {
-                _userMessage.emit("Original removed from Gallery. $immediateCount file(s) secured in Vault.")
-            }
-            if (urisNeedingDeletePermission.isNotEmpty()) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                    try {
-                        val pendingIntent = android.provider.MediaStore.createDeleteRequest(
-                            context.contentResolver,
-                            urisNeedingDeletePermission
-                        )
-                        val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(
-                            pendingIntent.intentSender
-                        ).build()
-                        setAwaitingExternalActivity(true)
-                        _pendingDeleteIntentSender.emit(intentSenderRequest)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        val toCancel = synchronized(pendingImports) {
-                            val list = pendingImports.toList()
-                            pendingImports.clear()
-                            list
-                        }
-                        toCancel.forEach { (_, stagedFile) ->
-                            repository.cancelPendingImport(stagedFile)
-                        }
+                        failedOriginalDeleteCount++
                     }
                 } else {
-                    val toCancel = synchronized(pendingImports) {
-                        val list = pendingImports.toList()
-                        pendingImports.clear()
-                        list
-                    }
-                    toCancel.forEach { (_, stagedFile) ->
-                        repository.cancelPendingImport(stagedFile)
-                    }
+                    errorMessage = result.errorMessage
                 }
             }
+
+            if (urisNeedingDeletePermission.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                try {
+                    val pendingIntent = android.provider.MediaStore.createDeleteRequest(
+                        context.contentResolver,
+                        urisNeedingDeletePermission
+                    )
+                    val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(
+                        pendingIntent.intentSender
+                    ).build()
+                    setAwaitingExternalActivity(true)
+                    _pendingDeleteIntentSender.emit(intentSenderRequest)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    _userMessage.emit("Secured $successCount file(s) in Vault. Original could not be removed from Gallery (manual deletion required).")
+                }
+            } else {
+                if (originalDeletedCount > 0 && failedOriginalDeleteCount == 0) {
+                    _userMessage.emit("Original removed from Gallery. $originalDeletedCount file(s) secured in Vault.")
+                } else if (successCount > 0 && failedOriginalDeleteCount > 0) {
+                    _userMessage.emit("Secured $successCount file(s) in Vault. Original could not be removed automatically; please delete original manually.")
+                } else if (successCount == 0) {
+                    _userMessage.emit(errorMessage ?: "Failed to import selected file(s).")
+                }
+            }
+        }
+    }
+
+    fun renameItem(item: VaultItem, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            repository.renameItem(item.id, trimmed)
+            _userMessage.emit("Renamed to $trimmed")
         }
     }
 
