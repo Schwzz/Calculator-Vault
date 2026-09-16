@@ -563,7 +563,7 @@ fun VaultMediaPlayerDialog(
                         )
                     }
 
-                    // Bottom Action Bar: Share, Edit, Unhide, Delete, Volume/Mute
+                    // Bottom Action Bar: Rename, Unhide, Delete, Volume/Mute
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -572,45 +572,17 @@ fun VaultMediaPlayerDialog(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1. Share
-                        PlayerActionButton(
-                            icon = Icons.Default.Share,
-                            label = "Share",
-                            testTag = "player_action_share",
-                            onClick = {
-                                val shareFile = File(item.storedPath)
-                                if (shareFile.exists()) {
-                                    try {
-                                        val shareUri = FileProvider.getUriForFile(
-                                            context,
-                                            "${context.packageName}.fileprovider",
-                                            shareFile
-                                        )
-                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                            type = item.mimeType.ifEmpty { "video/*" }
-                                            putExtra(Intent.EXTRA_STREAM, shareUri)
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        }
-                                        viewModel?.setAwaitingExternalActivity(true)
-                                        context.startActivity(Intent.createChooser(shareIntent, "Share Video"))
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                    }
-                                }
-                            }
-                        )
-
-                        // 2. Edit (Rename)
+                        // 1. Rename
                         PlayerActionButton(
                             icon = Icons.Default.Edit,
-                            label = "Edit",
-                            testTag = "player_action_edit",
+                            label = "Rename",
+                            testTag = "player_action_rename",
                             onClick = {
                                 showRenameDialog = true
                             }
                         )
 
-                        // 3. Unhide
+                        // 2. Unhide
                         PlayerActionButton(
                             icon = Icons.Default.FileDownload,
                             label = "Unhide",

@@ -1023,44 +1023,7 @@ fun FullScreenPhotoViewer(
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // 1. Share
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier
-                                        .clickable {
-                                            try {
-                                                val file = File(currentPhoto.storedPath)
-                                                if (file.exists()) {
-                                                    val shareUri = FileProvider.getUriForFile(
-                                                        context,
-                                                        "${context.packageName}.fileprovider",
-                                                        file
-                                                    )
-                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                        type = currentPhoto.mimeType.ifEmpty { "image/*" }
-                                                        putExtra(Intent.EXTRA_STREAM, shareUri)
-                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                    }
-                                                    viewModel.setAwaitingExternalActivity(true)
-                                                    context.startActivity(Intent.createChooser(shareIntent, "Share Photo"))
-                                                }
-                                            } catch (e: Exception) {
-                                                e.printStackTrace()
-                                            }
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Share,
-                                        contentDescription = "Share",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("Share", color = Color.White, fontSize = 11.sp)
-                                }
-
-                                // 2. Unhide
+                                // 1. Unhide
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
