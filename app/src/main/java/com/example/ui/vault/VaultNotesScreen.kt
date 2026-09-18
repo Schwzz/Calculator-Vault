@@ -115,13 +115,13 @@ fun VaultNotesScreen(
                     }
                     Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
                         Text(
-                            text = "Private Notepad",
+                            text = "Notepad",
                             color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${notes.size} confidential notes",
+                            text = if (notes.size == 1) "1 note" else "${notes.size} notes",
                             color = VaultTextSecondary,
                             fontSize = 12.sp
                         )
@@ -201,7 +201,7 @@ fun VaultNotesScreen(
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = if (searchQuery.isEmpty()) "No private notes yet" else "No notes found",
+                            text = if (searchQuery.isEmpty()) "No notes yet" else "No notes found",
                             color = VaultTextPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold

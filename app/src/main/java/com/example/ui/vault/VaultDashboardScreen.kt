@@ -66,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -175,7 +176,7 @@ fun VaultDashboardScreen(
 
     val dashboardCards = listOf(
         DashboardItemData(
-            title = "Photos",
+            title = "Images",
             subtitle = if (photoCount == 1) "1 Item" else "$photoCount Items",
             icon = Icons.Default.Image,
             route = "vault_files/PHOTO",
@@ -309,7 +310,7 @@ fun VaultDashboardScreen(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("New Private Note", color = VaultTextPrimary) },
+                        text = { Text("New Note", color = VaultTextPrimary) },
                         leadingIcon = { Icon(Icons.Default.EditNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         onClick = {
                             showFabMenu = false
@@ -353,22 +354,13 @@ fun VaultDashboardScreen(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Column {
-                        Text(
-                            text = "Calculator",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.2).sp,
-                            color = VaultTextPrimary
-                        )
-                        Text(
-                            text = "PROTECTED VAULT",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 1.2.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                    Text(
+                        text = "Calculator",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.2).sp,
+                        color = VaultTextPrimary
+                    )
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -435,7 +427,7 @@ fun VaultDashboardCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .height(62.dp)
             .clickable(onClick = onClick)
             .testTag("dashboard_card_${item.title.lowercase().replace(' ', '_')}"),
         shape = cornerStyle.cardShape,
@@ -467,12 +459,16 @@ fun VaultDashboardCard(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
             ) {
                 Text(
                     text = item.title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 16.sp,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    ),
                     color = VaultTextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -480,7 +476,12 @@ fun VaultDashboardCard(
 
                 Text(
                     text = item.subtitle,
-                    fontSize = 10.sp,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                        lineHeight = 14.sp,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    ),
                     color = VaultTextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

@@ -111,10 +111,8 @@ fun VaultMediaPlayerDialog(
 
     // Audio & Action states
     var isMuted by remember { mutableStateOf(false) }
-    var showRenameDialog by remember { mutableStateOf(false) }
     var showUnhideConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var currentItemName by remember { mutableStateOf(item.name) }
 
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var videoSurface by remember { mutableStateOf<Surface?>(null) }
@@ -295,7 +293,7 @@ fun VaultMediaPlayerDialog(
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = currentItemName,
+                        text = item.name,
                         color = Color.White,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
@@ -444,7 +442,7 @@ fun VaultMediaPlayerDialog(
                     }
 
                     Text(
-                        text = currentItemName,
+                        text = item.name,
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -563,7 +561,7 @@ fun VaultMediaPlayerDialog(
                         )
                     }
 
-                    // Bottom Action Bar: Rename, Unhide, Delete, Volume/Mute
+                    // Bottom Action Bar: Unhide, Delete, Volume/Mute
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -572,17 +570,7 @@ fun VaultMediaPlayerDialog(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1. Rename
-                        PlayerActionButton(
-                            icon = Icons.Default.Edit,
-                            label = "Rename",
-                            testTag = "player_action_rename",
-                            onClick = {
-                                showRenameDialog = true
-                            }
-                        )
-
-                        // 2. Unhide
+                        // 1. Unhide
                         PlayerActionButton(
                             icon = Icons.Default.FileDownload,
                             label = "Unhide",
@@ -592,7 +580,7 @@ fun VaultMediaPlayerDialog(
                             }
                         )
 
-                        // 4. Delete
+                        // 2. Delete
                         PlayerActionButton(
                             icon = Icons.Default.Delete,
                             label = "Delete",
@@ -603,7 +591,7 @@ fun VaultMediaPlayerDialog(
                             }
                         )
 
-                        // 5. Volume / Mute
+                        // 3. Volume / Mute
                         PlayerActionButton(
                             icon = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
                             label = if (isMuted) "Muted" else "Mute",
@@ -625,7 +613,7 @@ fun VaultMediaPlayerDialog(
     // Confirmation Dialogs
     if (showUnhideConfirm) {
         VaultConfirmationDialog(
-            title = "Unhide \"$currentItemName\"?",
+            title = "Unhide \"${item.name}\"?",
             message = "This video will be restored to your public phone gallery and removed from the Vault.",
             confirmText = "Unhide",
             isDestructive = false,
@@ -648,7 +636,7 @@ fun VaultMediaPlayerDialog(
     if (showDeleteConfirm) {
         VaultConfirmationDialog(
             title = "Move to Trash?",
-            message = "Move \"$currentItemName\" to the Trash Bin? You can restore it later.",
+            message = "Move \"${item.name}\" to the Trash Bin? You can restore it later.",
             confirmText = "Delete",
             isDestructive = true,
             confirmTestTag = "confirm_delete_video",
@@ -660,53 +648,6 @@ fun VaultMediaPlayerDialog(
             },
             onDismiss = {
                 showDeleteConfirm = false
-            }
-        )
-    }
-
-    if (showRenameDialog) {
-        var newNameText by remember { mutableStateOf(currentItemName) }
-        AlertDialog(
-            onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename File", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp) },
-            text = {
-                OutlinedTextField(
-                    value = newNameText,
-                    onValueChange = { newNameText = it },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = Color(0xFF4A4A4A),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("rename_input_field")
-                )
-            },
-            shape = cornerStyle.dialogShape,
-            containerColor = VaultCardBackground,
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val trimmed = newNameText.trim()
-                        if (trimmed.isNotEmpty()) {
-                            currentItemName = trimmed
-                            viewModel?.renameItem(item, trimmed)
-                        }
-                        showRenameDialog = false
-                    },
-                    modifier = Modifier.testTag("confirm_rename_button")
-                ) {
-                    Text("Save", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showRenameDialog = false },
-                    modifier = Modifier.testTag("cancel_rename_button")
-                ) {
-                    Text("Cancel", color = Color(0xFFA0A0A0))
-                }
             }
         )
     }

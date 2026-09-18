@@ -551,70 +551,48 @@ fun VaultSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
                     border = BorderStroke(1.dp, VaultCardBorder)
                 ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Calculator Vault",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Vibecoded by: Swartzz",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
+                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "A covert photo, video, and files vault disguised behind a fully functional calculator with private browser, media downloader, and app-isolated local storage.",
-                            color = VaultTextSecondary,
-                            fontSize = 12.sp,
-                            lineHeight = 17.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "Version 2.0 • Build Protected",
-                            color = Color(0xFF6B7280),
-                            fontSize = 11.sp
+                            text = "Vault Calculator by: Swartzz",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
             }
 
-            // Disguise Info Section
+            // Forgot PIN Section
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("settings_forgot_pin_card"),
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = VaultBackground),
                     border = BorderStroke(1.dp, VaultCardBorder)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Disguise Quick Guide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            text = "Forgot PIN?",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "• The app launches as a 100% normal functional calculator.\n" +
-                            "• Standard arithmetic (+, -, ×, ÷) evaluates properly.\n" +
-                            "• Type your 4-digit PIN and press '=' to unlock your private vault.\n" +
-                            "• Long-press '=' if you ever forget your PIN to access offline recovery.",
+                            text = "If you ever forget your PIN, long-press the '=' button on the calculator screen and answer your security question to reset your PIN.",
                             color = VaultTextSecondary,
                             fontSize = 12.sp,
                             lineHeight = 18.sp

@@ -137,20 +137,22 @@ class VaultRepository(
 
         val rawId = uri.lastPathSegment?.toLongOrNull()
         if (rawId != null) {
-            val candidateIds = mutableListOf(rawId)
-            if (rawId >= 1_000_000_000L) {
-                candidateIds.add(rawId % 1_000_000_000L)
+            val candidateId = if (rawId >= 1_000_000_000L) rawId % 1_000_000_000L else rawId
+            val testUri = ContentUris.withAppendedId(targetTableUri, candidateId)
+
+            // If the URI was provided by the Android Photo Picker or media provider, return the reconstructed MediaStore URI
+            if (uri.authority?.contains("photopicker") == true || uri.path?.contains("picker") == true || uri.authority == "media") {
+                return testUri
             }
-            for (cId in candidateIds) {
-                val testUri = ContentUris.withAppendedId(targetTableUri, cId)
-                try {
-                    contentResolver.query(testUri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            return testUri
-                        }
+
+            try {
+                contentResolver.query(testUri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        return testUri
                     }
-                } catch (_: Exception) {}
-            }
+                }
+            } catch (_: Exception) {}
+            return testUri
         }
 
         // 4. Try matching in MediaStore by fileName & fileSize if known
@@ -329,16 +331,6 @@ class VaultRepository(
                 e.printStackTrace()
                 tempFile?.delete()
                 ImportResult(item = null, errorMessage = e.message)
-            }
-        }
-    }
-
-    suspend fun renameItem(id: Long, newName: String) {
-        withContext(Dispatchers.IO) {
-            val item = dao.getItemById(id) ?: return@withContext
-            val trimmed = newName.trim()
-            if (trimmed.isNotEmpty()) {
-                dao.updateItem(item.copy(name = trimmed))
             }
         }
     }

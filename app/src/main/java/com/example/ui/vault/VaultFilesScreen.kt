@@ -128,10 +128,10 @@ fun VaultFilesScreen(
     }
 
     val categoryTitle = when (categoryType) {
-        VaultFileType.PHOTO -> "Private Photos"
-        VaultFileType.VIDEO -> "Private Videos"
-        VaultFileType.AUDIO -> "Private Audio"
-        VaultFileType.FILE -> "Private Files"
+        VaultFileType.PHOTO -> "Images"
+        VaultFileType.VIDEO -> "Videos"
+        VaultFileType.AUDIO -> "Audio"
+        VaultFileType.FILE -> "Files"
     }
 
     val mimeType = when (categoryType) {

@@ -88,7 +88,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val _userMessage = MutableSharedFlow<String>()
     val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
 
-    private val _pendingDeleteIntentSender = MutableSharedFlow<androidx.activity.result.IntentSenderRequest>()
+    private val _pendingDeleteIntentSender = MutableSharedFlow<androidx.activity.result.IntentSenderRequest>(extraBufferCapacity = 1)
     val pendingDeleteIntentSender: SharedFlow<androidx.activity.result.IntentSenderRequest> = _pendingDeleteIntentSender.asSharedFlow()
 
     // Temporary flag to prevent auto-reset when launching external system activities (photo picker, document picker, share sheet, media delete confirmation)
@@ -263,15 +263,6 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     _userMessage.emit(errorMessage ?: "Failed to import selected file(s).")
                 }
             }
-        }
-    }
-
-    fun renameItem(item: VaultItem, newName: String) {
-        val trimmed = newName.trim()
-        if (trimmed.isEmpty()) return
-        viewModelScope.launch {
-            repository.renameItem(item.id, trimmed)
-            _userMessage.emit("Renamed to $trimmed")
         }
     }
 
