@@ -100,12 +100,50 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         isAwaitingExternalActivity = awaiting
     }
 
+    data class PendingDeleteEntry(
+        val originalUri: Uri,
+        val mediaStoreUri: Uri,
+        val fileName: String,
+        val fileSize: Long,
+        val fileType: VaultFileType
+    )
+    private val pendingDeleteEntries = mutableListOf<PendingDeleteEntry>()
+
     fun onDeletePermissionResult(granted: Boolean) {
         setAwaitingExternalActivity(false)
         viewModelScope.launch {
             if (granted) {
-                _userMessage.emit("Original removed from Gallery. File(s) secured in Vault.")
+                // Post-delete verification: verify whether original media sources actually ceased to exist!
+                val entriesToCheck = pendingDeleteEntries.toList()
+                pendingDeleteEntries.clear()
+
+                var actuallyDeleted = 0
+                var stillExisting = 0
+                entriesToCheck.forEach { entry ->
+                    val exists = repository.checkMediaSourceExists(
+                        getApplication(),
+                        entry.originalUri,
+                        entry.mediaStoreUri,
+                        entry.fileName,
+                        entry.fileSize,
+                        entry.fileType
+                    )
+                    if (exists) {
+                        stillExisting++
+                    } else {
+                        actuallyDeleted++
+                    }
+                }
+
+                if (actuallyDeleted > 0 && stillExisting == 0) {
+                    _userMessage.emit("Original removed from Gallery. File(s) secured in Vault.")
+                } else if (actuallyDeleted > 0 && stillExisting > 0) {
+                    _userMessage.emit("File(s) secured in Vault. $actuallyDeleted removed from Gallery, $stillExisting still in Gallery (manual deletion required).")
+                } else {
+                    _userMessage.emit("File(s) secured in Vault. Original could not be removed from Gallery (it is still present in your Gallery).")
+                }
             } else {
+                pendingDeleteEntries.clear()
                 _userMessage.emit("File(s) secured in Vault. Original was not removed from Gallery (permission denied).")
             }
         }
@@ -222,6 +260,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             val urisNeedingDeletePermission = mutableListOf<Uri>()
             var failedOriginalDeleteCount = 0
             var errorMessage: String? = null
+            pendingDeleteEntries.clear()
 
             uris.forEach { uri ->
                 val result = repository.importFile(context, uri, fallbackType)
@@ -231,6 +270,15 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                         originalDeletedCount++
                     } else if (result.pendingDeleteUri != null) {
                         urisNeedingDeletePermission.add(result.pendingDeleteUri)
+                        pendingDeleteEntries.add(
+                            PendingDeleteEntry(
+                                originalUri = uri,
+                                mediaStoreUri = result.pendingDeleteUri,
+                                fileName = result.item.name,
+                                fileSize = result.item.sizeBytes,
+                                fileType = result.item.fileType
+                            )
+                        )
                     } else {
                         failedOriginalDeleteCount++
                     }

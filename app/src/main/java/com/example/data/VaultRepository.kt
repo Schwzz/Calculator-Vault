@@ -54,21 +54,115 @@ class VaultRepository(
         return path.matches(Regex("^/external[^/]*/(images|video|audio|file|files)(/media)?/\\d+$"))
     }
 
-    private fun resolveToMediaStoreUri(
+    fun isMediaStoreUriValid(contentResolver: android.content.ContentResolver, uri: Uri): Boolean {
+        return try {
+            contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                cursor.moveToFirst()
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun checkMediaSourceExists(
+        context: Context,
+        originalUri: Uri?,
+        mediaStoreUri: Uri? = null,
+        fileName: String = "",
+        fileSize: Long = 0L,
+        fileType: VaultFileType = VaultFileType.FILE
+    ): Boolean {
+        val resolver = context.contentResolver
+
+        // 1. Try opening input stream on originalUri
+        if (originalUri != null) {
+            try {
+                resolver.openInputStream(originalUri)?.use { stream ->
+                    if (stream.read() != -1) {
+                        return true
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Try querying and opening mediaStoreUri
+        if (mediaStoreUri != null) {
+            if (isMediaStoreUriValid(resolver, mediaStoreUri)) {
+                return true
+            }
+            try {
+                resolver.openInputStream(mediaStoreUri)?.use { stream ->
+                    if (stream.read() != -1) {
+                        return true
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 3. Try checking target collection by fileName & size
+        if (fileName.isNotBlank() && fileSize > 0L) {
+            val tableUri = when (fileType) {
+                VaultFileType.PHOTO -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                VaultFileType.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                VaultFileType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                VaultFileType.FILE -> MediaStore.Files.getContentUri("external")
+            }
+            try {
+                resolver.query(
+                    tableUri,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?",
+                    arrayOf(fileName, fileSize.toString()),
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        return true
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        return false
+    }
+
+    fun resolveToMediaStoreUri(
         context: Context,
         uri: Uri,
         fileType: VaultFileType = VaultFileType.FILE,
         fileName: String = "",
         fileSize: Long = 0L
     ): Uri? {
-        // 1. If it is already a canonical MediaStore URI, return it directly
-        if (isCanonicalMediaStoreUri(uri)) {
+        val contentResolver = context.contentResolver
+
+        // 1. If it is already a canonical MediaStore URI, verify it exists
+        if (isCanonicalMediaStoreUri(uri) && isMediaStoreUriValid(contentResolver, uri)) {
             return uri
         }
 
-        val contentResolver = context.contentResolver
+        // 2. On Android 10+ (API 29+), use the official MediaStore.getMediaUri API
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val mediaUri = MediaStore.getMediaUri(context, uri)
+                if (mediaUri != null && isMediaStoreUriValid(contentResolver, mediaUri)) {
+                    return mediaUri
+                }
+            } catch (_: Exception) {}
+        }
 
-        // 2. If it is a DocumentsContract document URI
+        val targetTableUri = when (fileType) {
+            VaultFileType.PHOTO -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            VaultFileType.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            VaultFileType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            VaultFileType.FILE -> MediaStore.Files.getContentUri("external")
+        }
+
+        // 3. If it is a DocumentsContract document URI
         if (DocumentsContract.isDocumentUri(context, uri)) {
             val docId = DocumentsContract.getDocumentId(uri)
             val authority = uri.authority
@@ -76,26 +170,18 @@ class VaultRepository(
             // MediaDocumentsProvider
             if (authority == "com.android.providers.media.documents") {
                 val parts = docId.split(":")
-                if (parts.size >= 2) {
-                    val type = parts[0]
-                    val id = parts[1].toLongOrNull()
-                    if (id != null) {
-                        return when (type) {
-                            "image" -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                            "video" -> ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
-                            "audio" -> ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
-                            else -> ContentUris.withAppendedId(MediaStore.Files.getContentUri("external"), id)
-                        }
+                val id = if (parts.size >= 2) parts[1].toLongOrNull() else docId.toLongOrNull()
+                val type = if (parts.size >= 2) parts[0] else ""
+                if (id != null) {
+                    val table = when (type) {
+                        "image" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                        "video" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                        "audio" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                        else -> targetTableUri
                     }
-                } else {
-                    val id = docId.toLongOrNull()
-                    if (id != null) {
-                        return when (fileType) {
-                            VaultFileType.PHOTO -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                            VaultFileType.VIDEO -> ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
-                            VaultFileType.AUDIO -> ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
-                            VaultFileType.FILE -> ContentUris.withAppendedId(MediaStore.Files.getContentUri("external"), id)
-                        }
+                    val candidateUri = ContentUris.withAppendedId(table, id)
+                    if (isMediaStoreUriValid(contentResolver, candidateUri)) {
+                        return candidateUri
                     }
                 }
             }
@@ -104,15 +190,9 @@ class VaultRepository(
             if (authority == "com.android.externalstorage.documents") {
                 val subPath = docId.substringAfter(":")
                 val externalPath = "/storage/emulated/0/$subPath"
-                val tableUri = when (fileType) {
-                    VaultFileType.PHOTO -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                    VaultFileType.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                    VaultFileType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                    VaultFileType.FILE -> MediaStore.Files.getContentUri("external")
-                }
                 try {
                     contentResolver.query(
-                        tableUri,
+                        targetTableUri,
                         arrayOf(MediaStore.MediaColumns._ID),
                         "${MediaStore.MediaColumns.DATA} = ?",
                         arrayOf(externalPath),
@@ -120,39 +200,14 @@ class VaultRepository(
                     )?.use { cursor ->
                         if (cursor.moveToFirst()) {
                             val id = cursor.getLong(0)
-                            return ContentUris.withAppendedId(tableUri, id)
+                            val candidateUri = ContentUris.withAppendedId(targetTableUri, id)
+                            if (isMediaStoreUriValid(contentResolver, candidateUri)) {
+                                return candidateUri
+                            }
                         }
                     }
                 } catch (_: Exception) {}
             }
-        }
-
-        // 3. Photo Picker URI or query by candidate IDs
-        val targetTableUri = when (fileType) {
-            VaultFileType.PHOTO -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-            VaultFileType.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            VaultFileType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-            VaultFileType.FILE -> MediaStore.Files.getContentUri("external")
-        }
-
-        val rawId = uri.lastPathSegment?.toLongOrNull()
-        if (rawId != null) {
-            val candidateId = if (rawId >= 1_000_000_000L) rawId % 1_000_000_000L else rawId
-            val testUri = ContentUris.withAppendedId(targetTableUri, candidateId)
-
-            // If the URI was provided by the Android Photo Picker or media provider, return the reconstructed MediaStore URI
-            if (uri.authority?.contains("photopicker") == true || uri.path?.contains("picker") == true || uri.authority == "media") {
-                return testUri
-            }
-
-            try {
-                contentResolver.query(testUri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        return testUri
-                    }
-                }
-            } catch (_: Exception) {}
-            return testUri
         }
 
         // 4. Try matching in MediaStore by fileName & fileSize if known
@@ -173,13 +228,30 @@ class VaultRepository(
                 )?.use { cursor ->
                     if (cursor.moveToFirst()) {
                         val id = cursor.getLong(0)
-                        return ContentUris.withAppendedId(targetTableUri, id)
+                        val candidateUri = ContentUris.withAppendedId(targetTableUri, id)
+                        if (isMediaStoreUriValid(contentResolver, candidateUri)) {
+                            return candidateUri
+                        }
                     }
                 }
             } catch (_: Exception) {}
         }
 
         return null
+    }
+
+    private fun areStreamsIdentical(s1: InputStream, s2: InputStream): Boolean {
+        val b1 = ByteArray(8192)
+        val b2 = ByteArray(8192)
+        while (true) {
+            val r1 = s1.read(b1)
+            val r2 = s2.read(b2)
+            if (r1 != r2) return false
+            if (r1 == -1) return true
+            for (i in 0 until r1) {
+                if (b1[i] != b2[i]) return false
+            }
+        }
     }
 
     suspend fun importFile(context: Context, uri: Uri, fallbackType: VaultFileType = VaultFileType.FILE): ImportResult {
@@ -320,6 +392,14 @@ class VaultRepository(
                     } catch (_: Exception) {}
                 }
 
+                // If direct deletion returned true, independently verify if media source really is gone!
+                if (originalDeleted) {
+                    val stillExists = checkMediaSourceExists(context, uri, resolvedMediaStoreUri, fileName, actualSize, detectedType)
+                    if (stillExists) {
+                        originalDeleted = false
+                    }
+                }
+
                 if (originalDeleted) {
                     ImportResult(item = insertedItem, originalDeleted = true)
                 } else if (resolvedMediaStoreUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -429,20 +509,22 @@ class VaultRepository(
                     } catch (_: Exception) {}
                 }
 
-                // If public copy already exists: do NOT create a duplicate!
-                if (originalPublicExists) {
-                    var publicValid = true
-                    if (verifiedExistingUri != null) {
-                        try {
-                            resolver.openInputStream(verifiedExistingUri!!)?.use { s ->
-                                publicValid = (s.read() != -1)
+                // If public copy already exists: verify whether it is identical to the Vault copy
+                if (originalPublicExists && verifiedExistingUri != null) {
+                    var isIdentical = false
+                    try {
+                        resolver.openInputStream(verifiedExistingUri!!)?.use { pubStream ->
+                            sourceFile.inputStream().use { vaultStream ->
+                                isIdentical = areStreamsIdentical(pubStream, vaultStream)
                             }
-                        } catch (_: Exception) {
-                            publicValid = false
                         }
+                    } catch (_: Exception) {
+                        isIdentical = false
                     }
-                    if (publicValid) {
-                        // Public already has exactly 1 copy. Remove vault copy & record cleanly.
+
+                    if (isIdentical) {
+                        // Public already has the exact identical copy!
+                        // Safely remove redundant vault copy & record cleanly without creating duplicate.
                         sourceFile.delete()
                         dao.deleteItemsPermanently(listOf(item.id))
                         return@withContext true
