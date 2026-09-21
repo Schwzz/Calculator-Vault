@@ -6,6 +6,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.collection.LruCache
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -157,10 +158,13 @@ fun VaultFilesScreen(
         viewModel.onDeletePermissionResult(result.resultCode == android.app.Activity.RESULT_OK)
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.pendingDeleteIntentSender.collect { intentSenderRequest ->
-            viewModel.setAwaitingExternalActivity(true)
-            deleteIntentSenderLauncher.launch(intentSenderRequest)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            viewModel.pendingDeleteIntentSender.collect { intentSenderRequest ->
+                viewModel.setAwaitingExternalActivity(true)
+                deleteIntentSenderLauncher.launch(intentSenderRequest)
+            }
         }
     }
 

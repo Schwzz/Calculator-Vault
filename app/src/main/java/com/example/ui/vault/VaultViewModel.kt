@@ -120,7 +120,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 var actuallyDeleted = 0
                 var stillExisting = 0
                 entriesToCheck.forEach { entry ->
-                    val exists = repository.checkMediaSourceExists(
+                    var exists = repository.checkMediaSourceExists(
                         getApplication(),
                         entry.originalUri,
                         entry.mediaStoreUri,
@@ -128,6 +128,17 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                         entry.fileSize,
                         entry.fileType
                     )
+                    if (exists) {
+                        kotlinx.coroutines.delay(150)
+                        exists = repository.checkMediaSourceExists(
+                            getApplication(),
+                            entry.originalUri,
+                            entry.mediaStoreUri,
+                            entry.fileName,
+                            entry.fileSize,
+                            entry.fileType
+                        )
+                    }
                     if (exists) {
                         stillExisting++
                     } else {
@@ -289,9 +300,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
             if (urisNeedingDeletePermission.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 try {
+                    val distinctUris = urisNeedingDeletePermission.distinct()
                     val pendingIntent = android.provider.MediaStore.createDeleteRequest(
                         context.contentResolver,
-                        urisNeedingDeletePermission
+                        distinctUris
                     )
                     val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(
                         pendingIntent.intentSender

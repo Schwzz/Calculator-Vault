@@ -119,9 +119,38 @@ fun VaultMediaPlayerDialog(
     var videoWidth by remember { mutableIntStateOf(0) }
     var videoHeight by remember { mutableIntStateOf(0) }
 
-    // Back handler dismisses cleanly
+    // Back handler dismisses cleanly and stops playback
     BackHandler {
+        try {
+            if (mediaPlayer?.isPlaying == true) {
+                mediaPlayer?.pause()
+                isPlaying = false
+            }
+        } catch (_: Exception) {}
         onDismiss()
+    }
+
+    // Lifecycle observer: immediately pause video when app goes to background or becomes stopped
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE ||
+                event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                try {
+                    mediaPlayer?.let { mp ->
+                        if (mp.isPlaying) {
+                            mp.pause()
+                            isPlaying = false
+                            areControlsVisible = true
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // Auto-hide controls after 3 seconds of inactivity while playing
@@ -178,6 +207,9 @@ fun VaultMediaPlayerDialog(
 
         onDispose {
             try {
+                if (mp.isPlaying) {
+                    mp.pause()
+                }
                 mp.stop()
             } catch (_: Exception) {}
             try {

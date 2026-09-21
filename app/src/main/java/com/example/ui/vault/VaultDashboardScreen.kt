@@ -3,6 +3,7 @@ package com.example.ui.vault
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -157,10 +158,13 @@ fun VaultDashboardScreen(
         viewModel.onDeletePermissionResult(result.resultCode == android.app.Activity.RESULT_OK)
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.pendingDeleteIntentSender.collect { intentSenderRequest ->
-            viewModel.setAwaitingExternalActivity(true)
-            deleteIntentSenderLauncher.launch(intentSenderRequest)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            viewModel.pendingDeleteIntentSender.collect { intentSenderRequest ->
+                viewModel.setAwaitingExternalActivity(true)
+                deleteIntentSenderLauncher.launch(intentSenderRequest)
+            }
         }
     }
 

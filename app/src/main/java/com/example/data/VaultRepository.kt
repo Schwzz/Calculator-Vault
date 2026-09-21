@@ -80,7 +80,7 @@ class VaultRepository(
     ): Boolean {
         val resolver = context.contentResolver
 
-        // 1. Try opening input stream on originalUri
+        // 1. Try opening input stream on originalUri (the URI with granted read permission from picker)
         if (originalUri != null) {
             try {
                 resolver.openInputStream(originalUri)?.use { stream ->
@@ -93,12 +93,22 @@ class VaultRepository(
 
         // 2. Try querying and opening mediaStoreUri
         if (mediaStoreUri != null) {
-            if (isMediaStoreUriValid(resolver, mediaStoreUri)) {
-                return true
-            }
             try {
                 resolver.openInputStream(mediaStoreUri)?.use { stream ->
                     if (stream.read() != -1) {
+                        return true
+                    }
+                }
+            } catch (_: Exception) {}
+            try {
+                resolver.query(
+                    mediaStoreUri,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
                         return true
                     }
                 }
@@ -140,21 +150,6 @@ class VaultRepository(
     ): Uri? {
         val contentResolver = context.contentResolver
 
-        // 1. If it is already a canonical MediaStore URI, verify it exists
-        if (isCanonicalMediaStoreUri(uri) && isMediaStoreUriValid(contentResolver, uri)) {
-            return uri
-        }
-
-        // 2. On Android 10+ (API 29+), use the official MediaStore.getMediaUri API
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                val mediaUri = MediaStore.getMediaUri(context, uri)
-                if (mediaUri != null && isMediaStoreUriValid(contentResolver, mediaUri)) {
-                    return mediaUri
-                }
-            } catch (_: Exception) {}
-        }
-
         val targetTableUri = when (fileType) {
             VaultFileType.PHOTO -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             VaultFileType.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -162,32 +157,72 @@ class VaultRepository(
             VaultFileType.FILE -> MediaStore.Files.getContentUri("external")
         }
 
-        // 3. If it is a DocumentsContract document URI
+        // 1. If it is already a canonical MediaStore URI with an ID (e.g. content://media/external/images/media/1234)
+        if (uri.authority == "media") {
+            val path = uri.path ?: ""
+            val canonicalMatch = Regex("^/external[^/]*/(images|video|audio|file|files)(/media)?/(\\d+)$").find(path)
+            if (canonicalMatch != null) {
+                val mediaId = canonicalMatch.groupValues[3].toLongOrNull()
+                if (mediaId != null && mediaId > 0) {
+                    return ContentUris.withAppendedId(targetTableUri, mediaId)
+                }
+                return uri
+            }
+        }
+
+        // 2. Android Photo Picker URIs (Android 11-15, Google Play system updates, backported):
+        // Formats:
+        // content://media/picker/0/com.android.providers.media.photopicker/media/1000000034
+        // content://com.android.providers.media.photopicker/media/1000000034
+        // content://com.google.android.providers.media.photopicker/media/1000000034
+        val auth = uri.authority ?: ""
+        val path = uri.path ?: ""
+        val isPhotoPicker = auth.contains("photopicker") || (auth == "media" && path.contains("picker"))
+        if (isPhotoPicker) {
+            val id = uri.lastPathSegment?.toLongOrNull()
+                ?: Regex("/media/(\\d+)").find(path)?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("/(\\d+)$").find(path)?.groupValues?.get(1)?.toLongOrNull()
+            if (id != null && id > 0) {
+                return ContentUris.withAppendedId(targetTableUri, id)
+            }
+        }
+
+        // 3. DocumentsContract URI (e.g. from DocumentsUI / MediaDocumentsProvider)
         if (DocumentsContract.isDocumentUri(context, uri)) {
             val docId = DocumentsContract.getDocumentId(uri)
-            val authority = uri.authority
 
-            // MediaDocumentsProvider
-            if (authority == "com.android.providers.media.documents") {
+            // MediaDocumentsProvider (e.g. image:1000000034, video:1234, audio:5678)
+            if (auth == "com.android.providers.media.documents") {
                 val parts = docId.split(":")
                 val id = if (parts.size >= 2) parts[1].toLongOrNull() else docId.toLongOrNull()
-                val type = if (parts.size >= 2) parts[0] else ""
-                if (id != null) {
-                    val table = when (type) {
-                        "image" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                        "video" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                        "audio" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                val type = if (parts.size >= 2) parts[0].lowercase() else ""
+                if (id != null && id > 0) {
+                    val table = when {
+                        type == "image" || (type.isEmpty() && fileType == VaultFileType.PHOTO) -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                        type == "video" || (type.isEmpty() && fileType == VaultFileType.VIDEO) -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                        type == "audio" || (type.isEmpty() && fileType == VaultFileType.AUDIO) -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
                         else -> targetTableUri
                     }
-                    val candidateUri = ContentUris.withAppendedId(table, id)
-                    if (isMediaStoreUriValid(contentResolver, candidateUri)) {
-                        return candidateUri
-                    }
+                    return ContentUris.withAppendedId(table, id)
                 }
             }
 
+            // On Android 10+ (API 29+), use the official MediaStore.getMediaUri API for document URIs
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    val mediaUri = MediaStore.getMediaUri(context, uri)
+                    if (mediaUri != null) {
+                        val mId = mediaUri.lastPathSegment?.toLongOrNull()
+                        if (mId != null && mId > 0) {
+                            return ContentUris.withAppendedId(targetTableUri, mId)
+                        }
+                        return mediaUri
+                    }
+                } catch (_: Exception) {}
+            }
+
             // ExternalStorageProvider (primary:DCIM/Camera/...)
-            if (authority == "com.android.externalstorage.documents") {
+            if (auth == "com.android.externalstorage.documents") {
                 val subPath = docId.substringAfter(":")
                 val externalPath = "/storage/emulated/0/$subPath"
                 try {
@@ -200,9 +235,8 @@ class VaultRepository(
                     )?.use { cursor ->
                         if (cursor.moveToFirst()) {
                             val id = cursor.getLong(0)
-                            val candidateUri = ContentUris.withAppendedId(targetTableUri, id)
-                            if (isMediaStoreUriValid(contentResolver, candidateUri)) {
-                                return candidateUri
+                            if (id > 0) {
+                                return ContentUris.withAppendedId(targetTableUri, id)
                             }
                         }
                     }
@@ -210,7 +244,36 @@ class VaultRepository(
             }
         }
 
-        // 4. Try matching in MediaStore by fileName & fileSize if known
+        // 4. Try querying the selected URI directly for MediaStore.MediaColumns._ID
+        // Because the picker granted read permission on `uri`, querying `uri` itself succeeds
+        try {
+            contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                    if (idx != -1) {
+                        val id = cursor.getLong(idx)
+                        if (id > 0) {
+                            return ContentUris.withAppendedId(targetTableUri, id)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 5. Fallback: if URI ends with numeric segment
+        val lastPathId = uri.lastPathSegment?.toLongOrNull()
+            ?: Regex("/(\\d+)$").find(path)?.groupValues?.get(1)?.toLongOrNull()
+        if (lastPathId != null && lastPathId > 0) {
+            return ContentUris.withAppendedId(targetTableUri, lastPathId)
+        }
+
+        // 6. Try matching in MediaStore by fileName & fileSize if known
         if (fileName.isNotBlank()) {
             try {
                 val selection = if (fileSize > 0L) {
@@ -228,9 +291,8 @@ class VaultRepository(
                 )?.use { cursor ->
                     if (cursor.moveToFirst()) {
                         val id = cursor.getLong(0)
-                        val candidateUri = ContentUris.withAppendedId(targetTableUri, id)
-                        if (isMediaStoreUriValid(contentResolver, candidateUri)) {
-                            return candidateUri
+                        if (id > 0) {
+                            return ContentUris.withAppendedId(targetTableUri, id)
                         }
                     }
                 }

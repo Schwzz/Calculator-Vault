@@ -827,6 +827,27 @@ fun TrashMediaPreviewDialog(
     var durationMs by remember { mutableLongStateOf(if (item.durationMs > 0) item.durationMs else 1L) }
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE ||
+                event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                try {
+                    mediaPlayer?.let { mp ->
+                        if (mp.isPlaying) {
+                            mp.pause()
+                            isPlaying = false
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     DisposableEffect(item.storedPath) {
         val player = MediaPlayer()
         try {
@@ -845,6 +866,11 @@ fun TrashMediaPreviewDialog(
         }
 
         onDispose {
+            try {
+                if (player.isPlaying) {
+                    player.pause()
+                }
+            } catch (_: Exception) {}
             player.release()
             mediaPlayer = null
         }
