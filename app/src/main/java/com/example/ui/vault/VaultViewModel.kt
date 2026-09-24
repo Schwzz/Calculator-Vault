@@ -57,6 +57,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     val prefs = VaultPreferences(application)
     private val database = VaultDatabase.getDatabase(application)
     val repository = VaultRepository(database.vaultDao(), prefs)
+    val browserSessionManager = BrowserSessionManager(application)
 
     val activeItems: StateFlow<List<VaultItem>> = repository.activeItems
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -622,5 +623,14 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             repository.removeDownload(downloadId)
             _userMessage.emit("Download cancelled")
         }
+    }
+
+    fun resetBrowserSession() {
+        browserSessionManager.clearAllData()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        browserSessionManager.destroyAll()
     }
 }

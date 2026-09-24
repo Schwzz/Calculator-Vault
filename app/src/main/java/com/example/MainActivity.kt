@@ -191,6 +191,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         if (vaultViewModel.prefs.resetOnExit && !vaultViewModel.isAwaitingExternalActivity) {
+            vaultViewModel.resetBrowserSession()
             calculatorViewModel.resetKeypad()
             calculatorViewModel.refreshState()
             try {

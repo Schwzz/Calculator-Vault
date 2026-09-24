@@ -3,15 +3,7 @@ package com.example.ui.vault
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.view.View
-import android.webkit.CookieManager
-import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebStorage
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -19,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -46,13 +41,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -63,8 +58,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -72,10 +65,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -83,9 +75,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -94,33 +91,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
 import com.example.ui.theme.VaultCardBorder
 import com.example.ui.theme.VaultTextPrimary
 import com.example.ui.theme.VaultTextSecondary
-
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextStyle
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ui.theme.LocalVaultCornerStyle
 import kotlinx.coroutines.launch
-
-class BrowserTab(
-    val id: String = java.util.UUID.randomUUID().toString(),
-    initialTitle: String = "New Tab",
-    initialUrl: String = "",
-    initialFavicon: Bitmap? = null
-) {
-    var title by mutableStateOf(initialTitle)
-    var url by mutableStateOf(initialUrl)
-    var favicon by mutableStateOf<Bitmap?>(initialFavicon)
-}
 
 data class ResolutionOption(
     val label: String,
@@ -146,26 +127,17 @@ fun VaultBrowserScreen(
     onOpenDownloads: () -> Unit
 ) {
     val vaultUiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val tabs = remember { mutableStateListOf(BrowserTab()) }
-    var activeTabIndex by remember { mutableIntStateOf(0) }
-    var showTabSwitcher by remember { mutableStateOf(false) }
+    val browserSessionManager = viewModel.browserSessionManager
+    val tabs = browserSessionManager.tabs
+    val activeTabIndex = browserSessionManager.activeTabIndex
+    val activeTab = browserSessionManager.activeTab
+    val context = LocalContext.current
 
-    val activeTab = tabs.getOrNull(activeTabIndex) ?: tabs.first()
-    val currentTab = activeTab
-
-    var inputUrl by remember { mutableStateOf(activeTab.url) }
+    var inputUrl by remember(activeTab.id) { mutableStateOf(activeTab.url) }
     var isInputFocused by remember { mutableStateOf(false) }
-    var currentFavicon by remember { mutableStateOf<Bitmap?>(activeTab.favicon) }
-    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
-    var canGoBack by remember { mutableStateOf(false) }
-    var canGoForward by remember { mutableStateOf(false) }
-    var pageProgress by remember { mutableFloatStateOf(1f) }
-    var detectedVideoUrl by remember { mutableStateOf<String?>(null) }
-    var detectedVideoTitle by remember { mutableStateOf("Web Video") }
     var showResolutionPicker by remember { mutableStateOf(false) }
     var showClearDataConfirm by remember { mutableStateOf(false) }
-    var customVideoView by remember { mutableStateOf<View?>(null) }
-    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    var showTabSwitcher by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -174,37 +146,29 @@ fun VaultBrowserScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // Dynamic WebView Loading: Trigger loadUrl inside LaunchedEffect(activeTab.url)
-    LaunchedEffect(activeTab.url) {
-        val wv = webViewInstance
-        if (wv != null && activeTab.url.isNotEmpty() && wv.url != activeTab.url) {
-            wv.loadUrl(activeTab.url)
+    // Synchronize address bar input text with active tab URL when not focused by the user
+    LaunchedEffect(activeTab.url, isInputFocused) {
+        if (!isInputFocused) {
+            inputUrl = activeTab.url
         }
     }
 
-    LaunchedEffect(activeTabIndex) {
-        inputUrl = activeTab.url
-        currentFavicon = activeTab.favicon
-    }
-
-    BackHandler {
-        if (customVideoView != null) {
-            customViewCallback?.onCustomViewHidden()
-            customVideoView = null
-            customViewCallback = null
-        } else if (showResolutionPicker) {
-            showResolutionPicker = false
-        } else if (showTabSwitcher) {
-            showTabSwitcher = false
-        } else if (webViewInstance?.canGoBack() == true) {
-            webViewInstance?.goBack()
-        } else if (activeTab.url.isNotEmpty()) {
-            activeTab.url = ""
-            inputUrl = ""
-            currentFavicon = null
-            detectedVideoUrl = null
-        } else {
-            onNavigateBack()
+    // Lifecycle observer: pause active WebView when app/screen is paused or backgrounded,
+    // detach from view hierarchy on disposal to avoid memory leaks while preserving session
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, activeTab.id) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                browserSessionManager.pauseActiveWebView()
+            } else if (event == Lifecycle.Event.ON_RESUME) {
+                browserSessionManager.resumeActiveWebView()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            browserSessionManager.pauseActiveWebView()
+            browserSessionManager.detachWebView(activeTab)
         }
     }
 
@@ -227,12 +191,57 @@ fun VaultBrowserScreen(
         }
         activeTab.url = targetUrl
         inputUrl = targetUrl
+        activeTab.hasError = false
+        activeTab.errorMessage = null
         keyboardController?.hide()
         focusManager.clearFocus()
-        webViewInstance?.let { wv ->
-            if (wv.url != targetUrl) {
-                wv.loadUrl(targetUrl)
-            }
+
+        val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
+        wv.loadUrl(targetUrl)
+    }
+
+    fun goToHome() {
+        activeTab.url = ""
+        activeTab.title = "New Tab"
+        activeTab.favicon = null
+        activeTab.detectedVideoUrl = null
+        activeTab.hasError = false
+        activeTab.errorMessage = null
+        activeTab.canGoBack = false
+        activeTab.canGoForward = false
+        inputUrl = ""
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
+        wv.loadUrl("about:blank")
+    }
+
+    fun reloadCurrentPage() {
+        activeTab.hasError = false
+        activeTab.errorMessage = null
+        val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
+        wv.reload()
+    }
+
+    // Natural browser back navigation:
+    // 1. Exit fullscreen video if active
+    // 2. Dismiss open picker/switcher dialogs
+    // 3. Step back in WebView history
+    // 4. Leave Browser screen only when no WebView history remains
+    BackHandler {
+        val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
+        if (activeTab.customVideoView != null) {
+            activeTab.customViewCallback?.onCustomViewHidden()
+            activeTab.customVideoView = null
+            activeTab.customViewCallback = null
+        } else if (showResolutionPicker) {
+            showResolutionPicker = false
+        } else if (showTabSwitcher) {
+            showTabSwitcher = false
+        } else if (wv.canGoBack()) {
+            wv.goBack()
+        } else {
+            onNavigateBack()
         }
     }
 
@@ -241,179 +250,196 @@ fun VaultBrowserScreen(
             .fillMaxSize()
             .background(VaultBackground),
         containerColor = VaultBackground,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            Surface(
-                color = VaultCardBackground,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding(),
-                border = BorderStroke(1.dp, VaultCardBorder)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = onNavigateBack,
-                            modifier = Modifier.size(40.dp).testTag("browser_back_to_vault_button")
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Vault", tint = Color.White, modifier = Modifier.size(22.dp))
-                        }
-
-                        Spacer(modifier = Modifier.width(4.dp))
-
-                        // Search & URL Input Field - Decoupled state, IME Search, Favicon support, No text cutoff
-                        BasicTextField(
-                            value = inputUrl,
-                            onValueChange = { inputUrl = it },
-                            singleLine = true,
-                            maxLines = 1,
-                            textStyle = TextStyle(color = Color.White, fontSize = 13.5.sp),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(
-                                onSearch = {
-                                    navigateTo(inputUrl)
-                                    keyboardController?.hide()
-                                    focusManager.clearFocus()
-                                },
-                                onGo = {
-                                    navigateTo(inputUrl)
-                                    keyboardController?.hide()
-                                    focusManager.clearFocus()
-                                }
-                            ),
+            if (activeTab.customVideoView == null) {
+                Surface(
+                    color = VaultCardBackground,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding(),
+                    border = BorderStroke(1.dp, VaultCardBorder)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .onFocusChanged { isInputFocused = it.isFocused }
-                                .testTag("browser_search_input"),
-                            decorationBox = { innerTextField ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(42.dp)
-                                        .clip(RoundedCornerShape(21.dp))
-                                        .background(VaultBackground)
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultCardBorder,
-                                            shape = RoundedCornerShape(21.dp)
-                                        )
-                                        .padding(horizontal = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    val fav = currentFavicon
-                                    if (fav != null && !isInputFocused && currentTab.url.isNotEmpty()) {
-                                        Image(
-                                            bitmap = fav.asImageBitmap(),
-                                            contentDescription = "Favicon",
-                                            modifier = Modifier
-                                                .size(18.dp)
-                                                .clip(CircleShape)
-                                                .testTag("browser_favicon")
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.Search,
-                                            contentDescription = null,
-                                            tint = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultTextSecondary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                    }
-
-                                    Box(
-                                        modifier = Modifier.weight(1f),
-                                        contentAlignment = Alignment.CenterStart
-                                    ) {
-                                        if (inputUrl.isEmpty()) {
-                                            Text(
-                                                text = "Search or enter address",
-                                                color = VaultTextSecondary,
-                                                fontSize = 12.5.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        innerTextField()
-                                    }
-
-                                    if (inputUrl.isNotEmpty()) {
-                                        IconButton(
-                                            onClick = {
-                                                inputUrl = ""
-                                            },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Clear",
-                                                tint = VaultTextSecondary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = onNavigateBack,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("browser_back_to_vault_button")
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to Vault",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
-                        )
 
-                        Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
 
-                        // Tab Counter Button
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(1.5.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
-                                .clickable { showTabSwitcher = true }
-                                .testTag("browser_tab_switcher_button"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = tabs.size.toString(),
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                            // Search & URL Input Field
+                            BasicTextField(
+                                value = inputUrl,
+                                onValueChange = { inputUrl = it },
+                                singleLine = true,
+                                maxLines = 1,
+                                textStyle = TextStyle(color = Color.White, fontSize = 13.5.sp),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(
+                                    onSearch = {
+                                        navigateTo(inputUrl)
+                                    },
+                                    onGo = {
+                                        navigateTo(inputUrl)
+                                    }
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .onFocusChanged { isInputFocused = it.isFocused }
+                                    .testTag("browser_search_input"),
+                                decorationBox = { innerTextField ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(42.dp)
+                                            .clip(RoundedCornerShape(21.dp))
+                                            .background(VaultBackground)
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultCardBorder,
+                                                shape = RoundedCornerShape(21.dp)
+                                            )
+                                            .padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val fav = activeTab.favicon
+                                        if (fav != null && !isInputFocused && activeTab.url.isNotEmpty()) {
+                                            Image(
+                                                bitmap = fav.asImageBitmap(),
+                                                contentDescription = "Favicon",
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape)
+                                                    .testTag("browser_favicon")
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.Search,
+                                                contentDescription = null,
+                                                tint = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultTextSecondary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        }
+
+                                        Box(
+                                            modifier = Modifier.weight(1f),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            if (inputUrl.isEmpty()) {
+                                                Text(
+                                                    text = "Search or enter address",
+                                                    color = VaultTextSecondary,
+                                                    fontSize = 12.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            innerTextField()
+                                        }
+
+                                        if (inputUrl.isNotEmpty()) {
+                                            IconButton(
+                                                onClick = {
+                                                    inputUrl = ""
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Clear",
+                                                    tint = VaultTextSecondary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // Tab Counter Button
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.5.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                                    .clickable { showTabSwitcher = true }
+                                    .testTag("browser_tab_switcher_button"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = tabs.size.toString(),
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onOpenDownloads,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("browser_downloads_button")
+                            ) {
+                                Icon(
+                                    Icons.Default.Download,
+                                    contentDescription = "Downloads",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showClearDataConfirm = true },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("browser_clear_data_button")
+                            ) {
+                                Icon(
+                                    Icons.Outlined.DeleteOutline,
+                                    contentDescription = "Clear Browser Data",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        if (activeTab.pageProgress < 1f && activeTab.url.isNotEmpty()) {
+                            LinearProgressIndicator(
+                                progress = { activeTab.pageProgress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.5.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = Color.Transparent
                             )
                         }
-
-                        IconButton(
-                            onClick = onOpenDownloads,
-                            modifier = Modifier.size(36.dp).testTag("browser_downloads_button")
-                        ) {
-                            Icon(Icons.Default.Download, contentDescription = "Downloads", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        }
-
-                        IconButton(
-                            onClick = { showClearDataConfirm = true },
-                            modifier = Modifier.size(36.dp).testTag("browser_clear_data_button")
-                        ) {
-                            Icon(
-                                Icons.Outlined.DeleteOutline,
-                                contentDescription = "Clear Browser Data",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    if (pageProgress < 1f && currentTab.url.isNotEmpty()) {
-                        LinearProgressIndicator(
-                            progress = { pageProgress },
-                            modifier = Modifier.fillMaxWidth().height(2.5.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = Color.Transparent
-                        )
                     }
                 }
             }
         },
         bottomBar = {
-            if (currentTab.url.isNotEmpty()) {
+            if (activeTab.customVideoView == null && activeTab.url.isNotEmpty() && !isInputFocused) {
                 Surface(
                     color = VaultCardBackground,
                     border = BorderStroke(1.dp, VaultCardBorder),
@@ -429,38 +455,42 @@ fun VaultBrowserScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
-                            onClick = { webViewInstance?.goBack() },
-                            enabled = canGoBack
+                            onClick = {
+                                val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
+                                if (wv.canGoBack()) wv.goBack()
+                            },
+                            enabled = activeTab.canGoBack
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
-                                tint = if (canGoBack) Color.White else Color(0xFF555555)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { webViewInstance?.goForward() },
-                            enabled = canGoForward
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Forward",
-                                tint = if (canGoForward) Color.White else Color(0xFF555555)
+                                tint = if (activeTab.canGoBack) Color.White else Color(0xFF555555)
                             )
                         }
 
                         IconButton(
                             onClick = {
-                                currentTab.url = ""
-                                inputUrl = ""
-                                detectedVideoUrl = null
-                            }
+                                val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
+                                if (wv.canGoForward()) wv.goForward()
+                            },
+                            enabled = activeTab.canGoForward
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Forward",
+                                tint = if (activeTab.canGoForward) Color.White else Color(0xFF555555)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { goToHome() }
                         ) {
                             Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White)
                         }
 
-                        IconButton(onClick = { webViewInstance?.reload() }) {
+                        IconButton(
+                            onClick = { reloadCurrentPage() }
+                        ) {
                             Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Color.White)
                         }
                     }
@@ -473,154 +503,88 @@ fun VaultBrowserScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Live WebView - Always kept in layout with Modifier.fillMaxSize()
+            // Live WebView - Viewport is naturally placed between Scaffold's topBar and bottomBar
             AndroidView(
                 factory = { ctx ->
-                    WebView(ctx).apply {
-                        // Hardware acceleration enabled for high-performance HTML5 video & smooth rendering
-                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
-
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            databaseEnabled = true
-                            allowFileAccess = false
-                            allowContentAccess = false
-                            mediaPlaybackRequiresUserGesture = false
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
-                            setSupportZoom(true)
-                            builtInZoomControls = true
-                            displayZoomControls = false
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                            cacheMode = WebSettings.LOAD_DEFAULT
-                        }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
-                                // Gracefully handle render process termination without crashing
-                                return true
-                            }
-
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                super.onPageStarted(view, url, favicon)
-                                if (!isInputFocused) {
-                                    inputUrl = url ?: ""
-                                }
-                                activeTab.url = url ?: ""
-                                if (favicon != null) {
-                                    currentFavicon = favicon
-                                    activeTab.favicon = favicon
-                                }
-                                pageProgress = 0.2f
-                                canGoBack = view?.canGoBack() ?: false
-                                canGoForward = view?.canGoForward() ?: false
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                pageProgress = 1f
-                                canGoBack = view?.canGoBack() ?: false
-                                canGoForward = view?.canGoForward() ?: false
-                                activeTab.title = view?.title ?: "Page"
-                                if (!isInputFocused) {
-                                    inputUrl = url ?: ""
-                                }
-
-                                // Automatic video detection script
-                                val checkVideoJs = """
-                                    (function() {
-                                        var v = document.querySelector('video');
-                                        if (v && v.src) return v.src;
-                                        var sources = document.querySelectorAll('video source');
-                                        for (var i=0; i<sources.length; i++) {
-                                            if (sources[i].src) return sources[i].src;
-                                        }
-                                        return '';
-                                    })();
-                                """.trimIndent()
-                                view?.evaluateJavascript(checkVideoJs) { result ->
-                                    val clean = result?.replace("\"", "")?.trim()
-                                    if (!clean.isNullOrEmpty() && clean != "null") {
-                                        detectedVideoUrl = clean
-                                        detectedVideoTitle = view?.title ?: "Web Video"
-                                    }
-                                }
-
-                                if (url?.contains("youtube.com") == true || url?.contains("vimeo") == true || url?.contains(".mp4") == true) {
-                                    detectedVideoUrl = url
-                                    detectedVideoTitle = view?.title ?: "Streaming Video"
-                                }
-                            }
-
-                            override fun shouldInterceptRequest(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): WebResourceResponse? {
-                                val reqUrl = request?.url?.toString() ?: ""
-                                if (reqUrl.endsWith(".mp4", true) || reqUrl.contains(".mp4?") || reqUrl.contains("videoplayback")) {
-                                    detectedVideoUrl = reqUrl
-                                }
-                                return super.shouldInterceptRequest(view, request)
-                            }
-                        }
-
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                pageProgress = newProgress / 100f
-                                super.onProgressChanged(view, newProgress)
-                            }
-
-                            override fun onReceivedTitle(view: WebView?, title: String?) {
-                                super.onReceivedTitle(view, title)
-                                if (!title.isNullOrEmpty()) {
-                                    activeTab.title = title
-                                }
-                            }
-
-                            override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
-                                super.onReceivedIcon(view, icon)
-                                if (icon != null) {
-                                    currentFavicon = icon
-                                    activeTab.favicon = icon
-                                }
-                            }
-
-                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                customVideoView = view
-                                customViewCallback = callback
-                            }
-
-                            override fun onHideCustomView() {
-                                customViewCallback?.onCustomViewHidden()
-                                customVideoView = null
-                                customViewCallback = null
-                            }
-                        }
-
-                        if (activeTab.url.isNotEmpty()) {
-                            loadUrl(activeTab.url)
-                        }
-                    }
+                    browserSessionManager.getOrCreateWebView(activeTab, ctx)
                 },
-                update = { wv ->
-                    webViewInstance = wv
-                    if (activeTab.url.isNotEmpty() && wv.url != activeTab.url) {
-                        wv.loadUrl(activeTab.url)
-                    }
+                update = {
+                    // Session and state retention is handled by BrowserSessionManager
                 },
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Custom Fullscreen Web Video container (e.g. YouTube / HTML5 video fullscreen)
-            if (customVideoView != null) {
-                AndroidView(
-                    factory = { customVideoView!! },
+            // Graceful browser error state when network or connection fails
+            if (activeTab.hasError && activeTab.url.isNotEmpty()) {
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black)
-                )
+                        .background(VaultBackground)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Error",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Unable to Load Page",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = activeTab.errorMessage ?: "The webpage could not be loaded. Please check your connection and try again.",
+                        color = VaultTextSecondary,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { reloadCurrentPage() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            shape = cornerStyle.buttonShape
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Try Again")
+                        }
+
+                        Button(
+                            onClick = { goToHome() },
+                            colors = ButtonDefaults.buttonColors(containerColor = VaultCardBackground),
+                            border = BorderStroke(1.dp, VaultCardBorder),
+                            shape = cornerStyle.buttonShape
+                        ) {
+                            Icon(Icons.Default.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Go to Home", color = Color.White)
+                        }
+                    }
+                }
             }
 
             // Minimal, elegant private browser start page (displayed when active tab URL is empty)
@@ -629,6 +593,7 @@ fun VaultBrowserScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(VaultBackground)
+                        .navigationBarsPadding()
                         .padding(horizontal = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
@@ -703,7 +668,7 @@ fun VaultBrowserScreen(
 
             // Floating Video Downloader Button
             AnimatedVisibility(
-                visible = detectedVideoUrl != null && activeTab.url.isNotEmpty(),
+                visible = activeTab.detectedVideoUrl != null && activeTab.url.isNotEmpty() && !activeTab.hasError,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                 modifier = Modifier
@@ -728,6 +693,20 @@ fun VaultBrowserScreen(
                     )
                 }
             }
+        }
+    }
+
+    // Custom Fullscreen Web Video container (renders over full screen with black backdrop)
+    if (activeTab.customVideoView != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            AndroidView(
+                factory = { activeTab.customVideoView!! },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 
@@ -767,7 +746,7 @@ fun VaultBrowserScreen(
                     }
 
                     Text(
-                        text = detectedVideoTitle,
+                        text = activeTab.detectedVideoTitle,
                         color = VaultTextSecondary,
                         fontSize = 13.sp,
                         maxLines = 1,
@@ -794,8 +773,8 @@ fun VaultBrowserScreen(
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     viewModel.startVideoDownload(
-                                        title = detectedVideoTitle,
-                                        url = detectedVideoUrl ?: "https://example.com/stream.mp4",
+                                        title = activeTab.detectedVideoTitle,
+                                        url = activeTab.detectedVideoUrl ?: "https://example.com/stream.mp4",
                                         resolution = opt.label,
                                         estimatedBytes = opt.estimatedBytes
                                     )
@@ -894,9 +873,8 @@ fun VaultBrowserScreen(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
                                     .clickable {
-                                        activeTabIndex = index
+                                        browserSessionManager.selectTab(index)
                                         inputUrl = tab.url
-                                        currentFavicon = tab.favicon
                                         showTabSwitcher = false
                                     },
                                 colors = CardDefaults.cardColors(containerColor = VaultBackground),
@@ -953,17 +931,17 @@ fun VaultBrowserScreen(
                                     if (tabs.size > 1) {
                                         IconButton(
                                             onClick = {
-                                                val removingCurrent = index == activeTabIndex
-                                                tabs.removeAt(index)
-                                                if (removingCurrent) {
-                                                    activeTabIndex = (activeTabIndex - 1).coerceAtLeast(0)
-                                                    inputUrl = tabs[activeTabIndex].url
-                                                    currentFavicon = tabs[activeTabIndex].favicon
-                                                }
+                                                browserSessionManager.closeTab(index)
+                                                inputUrl = browserSessionManager.activeTab.url
                                             },
                                             modifier = Modifier.size(28.dp)
                                         ) {
-                                            Icon(Icons.Default.Close, contentDescription = "Close Tab", tint = Color.White, modifier = Modifier.size(16.dp))
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Close Tab",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
                                         }
                                     }
                                 }
@@ -975,14 +953,13 @@ fun VaultBrowserScreen(
 
                     Button(
                         onClick = {
-                            val newTab = BrowserTab()
-                            tabs.add(newTab)
-                            activeTabIndex = tabs.lastIndex
+                            browserSessionManager.openNewTab()
                             inputUrl = ""
-                            currentFavicon = null
                             showTabSwitcher = false
                         },
-                        modifier = Modifier.fillMaxWidth().testTag("new_tab_button"),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("new_tab_button"),
                         shape = cornerStyle.buttonShape,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
@@ -1018,44 +995,13 @@ fun VaultBrowserScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        try {
-                            // 1. WebStorage delete all data
-                            WebStorage.getInstance().deleteAllData()
-
-                            // 2. CookieManager remove all cookies
-                            CookieManager.getInstance().removeAllCookies(null)
-                            CookieManager.getInstance().flush()
-
-                            // 3. Clear active WebView history and cache
-                            webViewInstance?.let { wv ->
-                                wv.clearHistory()
-                                wv.clearCache(true)
-                                wv.clearFormData()
-                                wv.clearSslPreferences()
-                            }
-
-                            // 4. Reset active tabs and URLs to clean state
-                            tabs.clear()
-                            val cleanTab = BrowserTab()
-                            tabs.add(cleanTab)
-                            activeTabIndex = 0
+                        browserSessionManager.clearAllData {
                             inputUrl = ""
-                            currentFavicon = null
-                            detectedVideoUrl = null
-                            canGoBack = false
-                            canGoForward = false
-
-                            // Show confirmation snackbar
                             scope.launch {
                                 snackbarHostState.showSnackbar("Browser cache & history cleared")
                             }
-                        } catch (e: Exception) {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Cleared browser data")
-                            }
-                        } finally {
-                            showClearDataConfirm = false
                         }
+                        showClearDataConfirm = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = cornerStyle.buttonShape,
@@ -1075,4 +1021,3 @@ fun VaultBrowserScreen(
         )
     }
 }
-
