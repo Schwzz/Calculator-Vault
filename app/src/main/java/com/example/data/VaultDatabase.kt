@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import com.example.model.BrowserHistoryItem
 import com.example.model.DownloadStatus
 import com.example.model.VaultDownload
 import com.example.model.VaultFileType
@@ -38,9 +39,10 @@ class Converters {
     entities = [
         VaultItem::class,
         VaultNote::class,
-        VaultDownload::class
+        VaultDownload::class,
+        BrowserHistoryItem::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

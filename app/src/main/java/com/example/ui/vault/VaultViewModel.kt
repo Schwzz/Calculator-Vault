@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.VaultDatabase
 import com.example.data.VaultPreferences
 import com.example.data.VaultRepository
+import com.example.model.BrowserHistoryItem
 import com.example.model.DownloadStatus
 import com.example.model.VaultDownload
 import com.example.model.VaultFileType
@@ -73,6 +74,17 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     val allDownloads: StateFlow<List<VaultDownload>> = repository.allDownloads
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val browserHistory: StateFlow<List<BrowserHistoryItem>> = repository.browserHistory
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        browserSessionManager.onPageVisited = { url, title, isIncognito ->
+            if (!isIncognito) {
+                recordBrowserHistory(url, title)
+            }
+        }
+    }
 
     private val _uiState = MutableStateFlow(
         VaultUiState(
@@ -625,8 +637,53 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun recordBrowserHistory(url: String, title: String) {
+        viewModelScope.launch {
+            repository.recordHistory(url, title)
+        }
+    }
+
+    fun deleteBrowserHistoryItem(id: Long) {
+        viewModelScope.launch {
+            repository.deleteHistoryItem(id)
+        }
+    }
+
+    fun clearBrowserHistory() {
+        viewModelScope.launch {
+            repository.clearAllHistory()
+            _userMessage.emit("Browsing history cleared")
+        }
+    }
+
+    fun clearSelectedBrowserData(
+        clearHistory: Boolean,
+        clearCookies: Boolean,
+        clearCache: Boolean,
+        onComplete: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            if (clearHistory) {
+                repository.clearAllHistory()
+            }
+            browserSessionManager.clearSelectedData(clearCookies, clearCache) {
+                viewModelScope.launch {
+                    _userMessage.emit("Selected browser data cleared")
+                    onComplete()
+                }
+            }
+        }
+    }
+
     fun resetBrowserSession() {
-        browserSessionManager.clearAllData()
+        // Close ephemeral incognito tabs on exit, while preserving normal tabs and persistent cookies
+        val incognitoIndices = browserSessionManager.tabs.indices.filter { browserSessionManager.tabs[it].isIncognito }
+        incognitoIndices.reversed().forEach { idx ->
+            browserSessionManager.closeTab(idx)
+        }
+        try {
+            android.webkit.CookieManager.getInstance().flush()
+        } catch (_: Exception) {}
     }
 
     override fun onCleared() {

@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
+import com.example.model.BrowserHistoryItem
 import com.example.model.DownloadStatus
 import com.example.model.VaultDownload
 import com.example.model.VaultFileType
@@ -41,6 +42,7 @@ class VaultRepository(
     val activeNotes: Flow<List<VaultNote>> = dao.getAllActiveNotes()
     val trashNotes: Flow<List<VaultNote>> = dao.getTrashNotes()
     val allDownloads: Flow<List<VaultDownload>> = dao.getAllDownloads()
+    val browserHistory: Flow<List<BrowserHistoryItem>> = dao.getAllHistory()
 
     fun getItemsByType(type: VaultFileType): Flow<List<VaultItem>> = dao.getItemsByType(type)
     fun getItemCountByType(type: VaultFileType): Flow<Int> = dao.getItemCountByType(type)
@@ -754,6 +756,17 @@ class VaultRepository(
     suspend fun updateDownloadProgress(id: Long, progress: Float, downloaded: Long, speed: String, status: DownloadStatus) =
         dao.updateDownloadProgress(id, progress, downloaded, speed, status)
     suspend fun removeDownload(id: Long) = dao.deleteDownload(id)
+
+    // Browser History
+    suspend fun recordHistory(url: String, title: String) {
+        val cleanUrl = url.trim()
+        if (cleanUrl.isEmpty() || cleanUrl == "about:blank" || cleanUrl.startsWith("data:")) return
+        val cleanTitle = if (title.isBlank() || title.startsWith("http")) cleanUrl else title
+        dao.insertHistory(BrowserHistoryItem(url = cleanUrl, title = cleanTitle))
+    }
+
+    suspend fun deleteHistoryItem(id: Long) = dao.deleteHistoryItem(id)
+    suspend fun clearAllHistory() = dao.clearAllHistory()
 
     // Legacy Seed Data Cleanup (Ensures 100% clean, empty vault for real user files)
     suspend fun cleanLegacySeedDataIfPresent(context: Context) {

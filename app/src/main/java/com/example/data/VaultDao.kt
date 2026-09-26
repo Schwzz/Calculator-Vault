@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.example.model.BrowserHistoryItem
 import com.example.model.DownloadStatus
 import com.example.model.VaultDownload
 import com.example.model.VaultFileType
@@ -116,4 +117,17 @@ interface VaultDao {
 
     @Query("DELETE FROM vault_notes")
     suspend fun deleteAllNotes()
+
+    // Browser History
+    @Query("SELECT * FROM browser_history ORDER BY visitedAt DESC")
+    fun getAllHistory(): Flow<List<BrowserHistoryItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHistory(item: BrowserHistoryItem): Long
+
+    @Query("DELETE FROM browser_history WHERE id = :id")
+    suspend fun deleteHistoryItem(id: Long)
+
+    @Query("DELETE FROM browser_history")
+    suspend fun clearAllHistory()
 }

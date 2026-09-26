@@ -41,12 +41,22 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Tab
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
@@ -54,6 +64,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -78,10 +92,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -95,6 +111,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.model.BrowserHistoryItem
 import com.example.ui.theme.LocalVaultCornerStyle
 import com.example.ui.theme.VaultBackground
 import com.example.ui.theme.VaultCardBackground
@@ -102,6 +119,9 @@ import com.example.ui.theme.VaultCardBorder
 import com.example.ui.theme.VaultTextPrimary
 import com.example.ui.theme.VaultTextSecondary
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class ResolutionOption(
     val label: String,
@@ -119,6 +139,24 @@ val RESOLUTION_OPTIONS = listOf(
     ResolutionOption("MP3 Audio Only", "Audio (320kbps)", "4.1 MB", 4_100_000L, isAudio = true)
 )
 
+data class QuickShortcut(
+    val title: String,
+    val url: String,
+    val initial: String,
+    val color: Color
+)
+
+val QUICK_SHORTCUTS = listOf(
+    QuickShortcut("Google", "https://www.google.com", "G", Color(0xFF4285F4)),
+    QuickShortcut("YouTube", "https://www.youtube.com", "Y", Color(0xFFFF0000)),
+    QuickShortcut("Wikipedia", "https://www.wikipedia.org", "W", Color(0xFF9E9E9E)),
+    QuickShortcut("Reddit", "https://www.reddit.com", "R", Color(0xFFFF4500)),
+    QuickShortcut("DuckDuckGo", "https://duckduckgo.com", "D", Color(0xFFDE5833)),
+    QuickShortcut("GitHub", "https://github.com", "G", Color(0xFF6E5494)),
+    QuickShortcut("BBC News", "https://www.bbc.com/news", "B", Color(0xFFBB1919)),
+    QuickShortcut("X / Twitter", "https://twitter.com", "X", Color(0xFF1DA1F2))
+)
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun VaultBrowserScreen(
@@ -127,17 +165,23 @@ fun VaultBrowserScreen(
     onOpenDownloads: () -> Unit
 ) {
     val vaultUiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val browserHistory by viewModel.browserHistory.collectAsStateWithLifecycle()
     val browserSessionManager = viewModel.browserSessionManager
     val tabs = browserSessionManager.tabs
     val activeTabIndex = browserSessionManager.activeTabIndex
     val activeTab = browserSessionManager.activeTab
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     var inputUrl by remember(activeTab.id) { mutableStateOf(activeTab.url) }
     var isInputFocused by remember { mutableStateOf(false) }
-    var showResolutionPicker by remember { mutableStateOf(false) }
-    var showClearDataConfirm by remember { mutableStateOf(false) }
+
+    var showMenu by remember { mutableStateOf(false) }
     var showTabSwitcher by remember { mutableStateOf(false) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var showClearDataDialog by remember { mutableStateOf(false) }
+    var showSslDialog by remember { mutableStateOf(false) }
+    var showResolutionPicker by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -146,15 +190,20 @@ fun VaultBrowserScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // Synchronize address bar input text with active tab URL when not focused by the user
+    // Synchronize address bar input text with active tab URL when not actively typed into
     LaunchedEffect(activeTab.url, isInputFocused) {
         if (!isInputFocused) {
             inputUrl = activeTab.url
         }
     }
 
+    // Ensure WebView is resumed whenever active tab is selected
+    LaunchedEffect(activeTab.id) {
+        browserSessionManager.resumeActiveWebView()
+    }
+
     // Lifecycle observer: pause active WebView when app/screen is paused or backgrounded,
-    // detach from view hierarchy on disposal to avoid memory leaks while preserving session
+    // detach from view hierarchy on disposal to prevent leaks while retaining full session & state
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, activeTab.id) {
         val observer = LifecycleEventObserver { _, event ->
@@ -202,7 +251,7 @@ fun VaultBrowserScreen(
 
     fun goToHome() {
         activeTab.url = ""
-        activeTab.title = "New Tab"
+        activeTab.title = if (activeTab.isIncognito) "Incognito Tab" else "New Tab"
         activeTab.favicon = null
         activeTab.detectedVideoUrl = null
         activeTab.hasError = false
@@ -223,9 +272,15 @@ fun VaultBrowserScreen(
         wv.reload()
     }
 
+    fun stopLoadingPage() {
+        val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
+        wv.stopLoading()
+        activeTab.isLoading = false
+    }
+
     // Natural browser back navigation:
     // 1. Exit fullscreen video if active
-    // 2. Dismiss open picker/switcher dialogs
+    // 2. Dismiss open picker/dialog sheets
     // 3. Step back in WebView history
     // 4. Leave Browser screen only when no WebView history remains
     BackHandler {
@@ -238,6 +293,12 @@ fun VaultBrowserScreen(
             showResolutionPicker = false
         } else if (showTabSwitcher) {
             showTabSwitcher = false
+        } else if (showHistoryDialog) {
+            showHistoryDialog = false
+        } else if (showClearDataDialog) {
+            showClearDataDialog = false
+        } else if (showSslDialog) {
+            showSslDialog = false
         } else if (wv.canGoBack()) {
             wv.goBack()
         } else {
@@ -265,172 +326,329 @@ fun VaultBrowserScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Back to Vault Button
                             IconButton(
                                 onClick = onNavigateBack,
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(38.dp)
                                     .testTag("browser_back_to_vault_button")
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back to Vault",
                                     tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
                             Spacer(modifier = Modifier.width(4.dp))
 
-                            // Search & URL Input Field
-                            BasicTextField(
-                                value = inputUrl,
-                                onValueChange = { inputUrl = it },
-                                singleLine = true,
-                                maxLines = 1,
-                                textStyle = TextStyle(color = Color.White, fontSize = 13.5.sp),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                keyboardActions = KeyboardActions(
-                                    onSearch = {
-                                        navigateTo(inputUrl)
-                                    },
-                                    onGo = {
-                                        navigateTo(inputUrl)
-                                    }
+                            // Omnibox / Modern Address & Search Bar
+                            Surface(
+                                shape = RoundedCornerShape(22.dp),
+                                color = VaultBackground,
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultCardBorder
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .onFocusChanged { isInputFocused = it.isFocused }
-                                    .testTag("browser_search_input"),
-                                decorationBox = { innerTextField ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(42.dp)
-                                            .clip(RoundedCornerShape(21.dp))
-                                            .background(VaultBackground)
-                                            .border(
-                                                width = 1.dp,
-                                                color = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultCardBorder,
-                                                shape = RoundedCornerShape(21.dp)
-                                            )
-                                            .padding(horizontal = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                    .height(44.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Security Indicator / Favicon / Search Icon
+                                    val fav = activeTab.favicon
+                                    if (activeTab.isIncognito) {
+                                        Icon(
+                                            imageVector = Icons.Default.VisibilityOff,
+                                            contentDescription = "Incognito Mode",
+                                            tint = Color(0xFFA855F7),
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .clickable { showSslDialog = true }
+                                                .testTag("browser_incognito_badge")
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    } else if (fav != null && !isInputFocused && activeTab.url.isNotEmpty()) {
+                                        Image(
+                                            bitmap = fav.asImageBitmap(),
+                                            contentDescription = "Favicon",
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .clip(CircleShape)
+                                                .testTag("browser_favicon")
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    } else if (activeTab.url.isNotEmpty()) {
+                                        val isHttps = activeTab.isSecureConnection
+                                        Icon(
+                                            imageVector = if (isHttps) Icons.Default.Lock else Icons.Default.LockOpen,
+                                            contentDescription = if (isHttps) "Connection is secure" else "Connection not secure",
+                                            tint = if (isHttps) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                            modifier = Modifier
+                                                .size(17.dp)
+                                                .clickable { showSslDialog = true }
+                                                .testTag("browser_ssl_button")
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultTextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+
+                                    // Address Input Field
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.CenterStart
                                     ) {
-                                        val fav = activeTab.favicon
-                                        if (fav != null && !isInputFocused && activeTab.url.isNotEmpty()) {
-                                            Image(
-                                                bitmap = fav.asImageBitmap(),
-                                                contentDescription = "Favicon",
-                                                modifier = Modifier
-                                                    .size(18.dp)
-                                                    .clip(CircleShape)
-                                                    .testTag("browser_favicon")
+                                        if (inputUrl.isEmpty()) {
+                                            Text(
+                                                text = if (activeTab.isIncognito) "Search or enter address (Private)" else "Search or enter address",
+                                                color = VaultTextSecondary,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Default.Search,
-                                                contentDescription = null,
-                                                tint = if (isInputFocused) MaterialTheme.colorScheme.primary else VaultTextSecondary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
                                         }
 
-                                        Box(
-                                            modifier = Modifier.weight(1f),
-                                            contentAlignment = Alignment.CenterStart
+                                        BasicTextField(
+                                            value = inputUrl,
+                                            onValueChange = { inputUrl = it },
+                                            singleLine = true,
+                                            maxLines = 1,
+                                            textStyle = TextStyle(color = Color.White, fontSize = 13.5.sp),
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                            keyboardActions = KeyboardActions(
+                                                onSearch = { navigateTo(inputUrl) },
+                                                onGo = { navigateTo(inputUrl) }
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .onFocusChanged { isInputFocused = it.isFocused }
+                                                .testTag("browser_search_input")
+                                        )
+                                    }
+
+                                    // Right Action inside Omnibox: Clear, Stop, or Reload
+                                    if (isInputFocused && inputUrl.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { inputUrl = "" },
+                                            modifier = Modifier.size(24.dp)
                                         ) {
-                                            if (inputUrl.isEmpty()) {
-                                                Text(
-                                                    text = "Search or enter address",
-                                                    color = VaultTextSecondary,
-                                                    fontSize = 12.5.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                            innerTextField()
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Clear address",
+                                                tint = VaultTextSecondary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
                                         }
-
-                                        if (inputUrl.isNotEmpty()) {
-                                            IconButton(
-                                                onClick = {
-                                                    inputUrl = ""
-                                                },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Close,
-                                                    contentDescription = "Clear",
-                                                    tint = VaultTextSecondary,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
+                                    } else if (activeTab.isLoading && activeTab.url.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { stopLoadingPage() },
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .testTag("browser_stop_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Stop loading",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    } else if (activeTab.url.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { reloadCurrentPage() },
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .testTag("browser_reload_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Reload page",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(17.dp)
+                                            )
                                         }
                                     }
                                 }
-                            )
+                            }
 
                             Spacer(modifier = Modifier.width(6.dp))
 
-                            // Tab Counter Button
+                            // Tab Switcher Counter Button
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(34.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .border(1.5.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                                    .background(if (activeTab.isIncognito) Color(0xFFA855F7).copy(alpha = 0.2f) else Color.Transparent)
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = if (activeTab.isIncognito) Color(0xFFA855F7) else Color.White.copy(alpha = 0.8f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
                                     .clickable { showTabSwitcher = true }
                                     .testTag("browser_tab_switcher_button"),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = tabs.size.toString(),
-                                    color = Color.White,
-                                    fontSize = 12.sp,
+                                    color = if (activeTab.isIncognito) Color(0xFFA855F7) else Color.White,
+                                    fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
 
-                            IconButton(
-                                onClick = onOpenDownloads,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("browser_downloads_button")
-                            ) {
-                                Icon(
-                                    Icons.Default.Download,
-                                    contentDescription = "Downloads",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(2.dp))
 
-                            IconButton(
-                                onClick = { showClearDataConfirm = true },
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("browser_clear_data_button")
-                            ) {
-                                Icon(
-                                    Icons.Outlined.DeleteOutline,
-                                    contentDescription = "Clear Browser Data",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                            // 3-Dots Menu Button
+                            Box {
+                                IconButton(
+                                    onClick = { showMenu = true },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .testTag("browser_menu_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Browser Menu",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showMenu,
+                                    onDismissRequest = { showMenu = false },
+                                    modifier = Modifier
+                                        .background(VaultCardBackground)
+                                        .border(1.dp, VaultCardBorder, RoundedCornerShape(12.dp))
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("New Tab", color = Color.White) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        },
+                                        onClick = {
+                                            showMenu = false
+                                            browserSessionManager.openNewTab()
+                                            inputUrl = ""
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("New Incognito Tab", color = Color(0xFFA855F7)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Color(0xFFA855F7))
+                                        },
+                                        onClick = {
+                                            showMenu = false
+                                            browserSessionManager.openNewTab(isIncognito = true)
+                                            inputUrl = ""
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("History", color = Color.White) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.History, contentDescription = null, tint = Color.White)
+                                        },
+                                        onClick = {
+                                            showMenu = false
+                                            showHistoryDialog = true
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("Downloads", color = Color.White) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        },
+                                        onClick = {
+                                            showMenu = false
+                                            onOpenDownloads()
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("Desktop Site", color = Color.White)
+                                                Checkbox(
+                                                    checked = activeTab.isDesktopSite,
+                                                    onCheckedChange = null,
+                                                    colors = CheckboxDefaults.colors(
+                                                        checkedColor = MaterialTheme.colorScheme.primary,
+                                                        checkmarkColor = Color.White
+                                                    ),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Laptop, contentDescription = null, tint = Color.White)
+                                        },
+                                        onClick = {
+                                            showMenu = false
+                                            browserSessionManager.toggleDesktopSite(activeTab)
+                                        }
+                                    )
+
+                                    if (activeTab.url.isNotEmpty()) {
+                                        DropdownMenuItem(
+                                            text = { Text("Copy Link", color = Color.White) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White)
+                                            },
+                                            onClick = {
+                                                showMenu = false
+                                                clipboardManager.setText(AnnotatedString(activeTab.url))
+                                                scope.launch {
+                                                    snackbarHostState.showSnackbar("Link copied to clipboard")
+                                                }
+                                            }
+                                        )
+                                    }
+
+                                    DropdownMenuItem(
+                                        text = { Text("Clear Browsing Data...", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                        },
+                                        onClick = {
+                                            showMenu = false
+                                            showClearDataDialog = true
+                                        }
+                                    )
+                                }
                             }
                         }
 
+                        // Sleek Progress Indicator attached at bottom edge of topBar
                         if (activeTab.pageProgress < 1f && activeTab.url.isNotEmpty()) {
                             LinearProgressIndicator(
                                 progress = { activeTab.pageProgress },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(2.5.dp),
-                                color = MaterialTheme.colorScheme.primary,
+                                color = if (activeTab.isIncognito) Color(0xFFA855F7) else MaterialTheme.colorScheme.primary,
                                 trackColor = Color.Transparent
                             )
                         }
@@ -450,8 +668,8 @@ fun VaultBrowserScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceAround,
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
@@ -459,7 +677,8 @@ fun VaultBrowserScreen(
                                 val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
                                 if (wv.canGoBack()) wv.goBack()
                             },
-                            enabled = activeTab.canGoBack
+                            enabled = activeTab.canGoBack,
+                            modifier = Modifier.testTag("browser_nav_back")
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
@@ -473,7 +692,8 @@ fun VaultBrowserScreen(
                                 val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
                                 if (wv.canGoForward()) wv.goForward()
                             },
-                            enabled = activeTab.canGoForward
+                            enabled = activeTab.canGoForward,
+                            modifier = Modifier.testTag("browser_nav_forward")
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowForward,
@@ -483,15 +703,24 @@ fun VaultBrowserScreen(
                         }
 
                         IconButton(
-                            onClick = { goToHome() }
+                            onClick = { goToHome() },
+                            modifier = Modifier.testTag("browser_nav_home")
                         ) {
                             Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White)
                         }
 
                         IconButton(
-                            onClick = { reloadCurrentPage() }
+                            onClick = { showHistoryDialog = true },
+                            modifier = Modifier.testTag("browser_nav_history")
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Color.White)
+                            Icon(Icons.Default.History, contentDescription = "History", tint = Color.White)
+                        }
+
+                        IconButton(
+                            onClick = { showTabSwitcher = true },
+                            modifier = Modifier.testTag("browser_nav_tabs")
+                        ) {
+                            Icon(Icons.Default.Tab, contentDescription = "Tabs", tint = Color.White)
                         }
                     }
                 }
@@ -503,13 +732,15 @@ fun VaultBrowserScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Live WebView - Viewport is naturally placed between Scaffold's topBar and bottomBar
+            // Live WebView Viewport
             AndroidView(
                 factory = { ctx ->
-                    browserSessionManager.getOrCreateWebView(activeTab, ctx)
+                    val wv = browserSessionManager.getOrCreateWebView(activeTab, ctx)
+                    browserSessionManager.resumeActiveWebView()
+                    wv
                 },
                 update = {
-                    // Session and state retention is handled by BrowserSessionManager
+                    // Session and state retention is managed in BrowserSessionManager
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -587,86 +818,231 @@ fun VaultBrowserScreen(
                 }
             }
 
-            // Minimal, elegant private browser start page (displayed when active tab URL is empty)
+            // Real Browser Start Page (Displayed when active tab URL is empty)
             if (activeTab.url.isEmpty()) {
-                Column(
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(VaultBackground)
                         .navigationBarsPadding()
-                        .padding(horizontal = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
+                    item {
+                        Spacer(modifier = Modifier.height(20.dp))
 
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Text(
-                        text = "Private Browser",
-                        color = VaultTextPrimary,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "Incognito search and secure web downloads",
-                        color = VaultTextSecondary,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(28.dp))
-
-                    // Clean Search suggestions
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf("Google", "YouTube", "Wikipedia").forEach { site ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(VaultCardBackground)
-                                    .border(1.dp, VaultCardBorder, RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        when (site) {
-                                            "Google" -> navigateTo("https://www.google.com")
-                                            "YouTube" -> navigateTo("https://www.youtube.com")
-                                            "Wikipedia" -> navigateTo("https://www.wikipedia.org")
-                                        }
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = site,
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (activeTab.isIncognito) Color(0xFFA855F7).copy(alpha = 0.15f)
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                                 )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (activeTab.isIncognito) Color(0xFFA855F7).copy(alpha = 0.4f)
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (activeTab.isIncognito) Icons.Default.VisibilityOff else Icons.Default.Security,
+                                contentDescription = null,
+                                tint = if (activeTab.isIncognito) Color(0xFFA855F7) else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(38.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = if (activeTab.isIncognito) "Incognito Private Tab" else "Vault Browser",
+                            color = VaultTextPrimary,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = if (activeTab.isIncognito)
+                                "Browsing history is not saved in this tab. Cookies & session data are discarded when closed."
+                            else
+                                "Fast, private browsing with integrated video sniffer and web storage",
+                            color = VaultTextSecondary,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(28.dp))
+
+                        // Quick Shortcuts Grid
+                        Text(
+                            text = "Top Sites",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            QUICK_SHORTCUTS.take(4).forEach { shortcut ->
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { navigateTo(shortcut.url) }
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(VaultCardBackground)
+                                            .border(1.dp, VaultCardBorder, RoundedCornerShape(14.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = shortcut.initial,
+                                            color = shortcut.color,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = shortcut.title,
+                                        color = VaultTextSecondary,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            QUICK_SHORTCUTS.drop(4).take(4).forEach { shortcut ->
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { navigateTo(shortcut.url) }
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(VaultCardBackground)
+                                            .border(1.dp, VaultCardBorder, RoundedCornerShape(14.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = shortcut.initial,
+                                            color = shortcut.color,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = shortcut.title,
+                                        color = VaultTextSecondary,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        // Recent History Section (Only shown in regular browsing mode)
+                        if (!activeTab.isIncognito && browserHistory.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(28.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Recent History",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                TextButton(onClick = { showHistoryDialog = true }) {
+                                    Text("See all", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            browserHistory.take(4).forEach { historyItem ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { navigateTo(historyItem.url) },
+                                    colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
+                                    border = BorderStroke(1.dp, VaultCardBorder)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.History,
+                                            contentDescription = null,
+                                            tint = VaultTextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = historyItem.title,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = historyItem.url,
+                                                color = VaultTextSecondary,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(30.dp))
                     }
                 }
             }
 
-            // Floating Video Downloader Button
+            // Floating Snaptube Video Downloader Button
             AnimatedVisibility(
                 visible = activeTab.detectedVideoUrl != null && activeTab.url.isNotEmpty() && !activeTab.hasError,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -836,7 +1212,7 @@ fun VaultBrowserScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp)),
+                    .clip(RoundedCornerShape(18.dp)),
                 color = VaultCardBackground,
                 border = BorderStroke(1.dp, VaultCardBorder)
             ) {
@@ -847,7 +1223,7 @@ fun VaultBrowserScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Open Tabs (${tabs.size})",
+                            text = "Tabs (${tabs.size})",
                             color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
@@ -871,7 +1247,7 @@ fun VaultBrowserScreen(
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .clickable {
                                         browserSessionManager.selectTab(index)
                                         inputUrl = tab.url
@@ -880,7 +1256,9 @@ fun VaultBrowserScreen(
                                 colors = CardDefaults.cardColors(containerColor = VaultBackground),
                                 border = BorderStroke(
                                     width = if (isActive) 1.5.dp else 1.dp,
-                                    color = if (isActive) MaterialTheme.colorScheme.primary else VaultCardBorder
+                                    color = if (isActive) {
+                                        if (tab.isIncognito) Color(0xFFA855F7) else MaterialTheme.colorScheme.primary
+                                    } else VaultCardBorder
                                 )
                             ) {
                                 Row(
@@ -891,7 +1269,15 @@ fun VaultBrowserScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     val tabFav = tab.favicon
-                                    if (tabFav != null) {
+                                    if (tab.isIncognito) {
+                                        Icon(
+                                            imageVector = Icons.Default.VisibilityOff,
+                                            contentDescription = null,
+                                            tint = Color(0xFFA855F7),
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                    } else if (tabFav != null) {
                                         Image(
                                             bitmap = tabFav.asImageBitmap(),
                                             contentDescription = null,
@@ -911,14 +1297,28 @@ fun VaultBrowserScreen(
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = tab.title,
-                                            color = Color.White,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = tab.title,
+                                                color = Color.White,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            if (tab.isIncognito) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(Color(0xFFA855F7).copy(alpha = 0.2f))
+                                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                ) {
+                                                    Text("Incognito", color = Color(0xFFA855F7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
                                         Text(
                                             text = tab.url.ifEmpty { "New Tab" },
                                             color = VaultTextSecondary,
@@ -949,73 +1349,451 @@ fun VaultBrowserScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    Button(
-                        onClick = {
-                            browserSessionManager.openNewTab()
-                            inputUrl = ""
-                            showTabSwitcher = false
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("new_tab_button"),
-                        shape = cornerStyle.buttonShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Open New Tab", fontWeight = FontWeight.Bold)
+                        Button(
+                            onClick = {
+                                browserSessionManager.openNewTab()
+                                inputUrl = ""
+                                showTabSwitcher = false
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("new_tab_button"),
+                            shape = cornerStyle.buttonShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("New Tab", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                browserSessionManager.openNewTab(isIncognito = true)
+                                inputUrl = ""
+                                showTabSwitcher = false
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("new_incognito_tab_button"),
+                            shape = cornerStyle.buttonShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7))
+                        ) {
+                            Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Incognito", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
         }
     }
 
-    // Clear Browser Data Confirmation Dialog
-    if (showClearDataConfirm) {
+    // Browsing History Sheet / Dialog
+    if (showHistoryDialog) {
+        var historySearchQuery by remember { mutableStateOf("") }
+        var showClearAllHistoryConfirm by remember { mutableStateOf(false) }
+
+        val filteredHistory = remember(browserHistory, historySearchQuery) {
+            if (historySearchQuery.isBlank()) {
+                browserHistory
+            } else {
+                browserHistory.filter {
+                    it.title.contains(historySearchQuery, ignoreCase = true) ||
+                            it.url.contains(historySearchQuery, ignoreCase = true)
+                }
+            }
+        }
+
+        Dialog(onDismissRequest = { showHistoryDialog = false }) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp)),
+                color = VaultCardBackground,
+                border = BorderStroke(1.dp, VaultCardBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Browsing History",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(onClick = { showHistoryDialog = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Search History Filter
+                    BasicTextField(
+                        value = historySearchQuery,
+                        onValueChange = { historySearchQuery = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(19.dp))
+                            .background(VaultBackground)
+                            .border(1.dp, VaultCardBorder, RoundedCornerShape(19.dp))
+                            .padding(horizontal = 12.dp),
+                        decorationBox = { innerTextField ->
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = VaultTextSecondary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (historySearchQuery.isEmpty()) {
+                                        Text("Search history...", color = VaultTextSecondary, fontSize = 12.sp)
+                                    }
+                                    innerTextField()
+                                }
+                                if (historySearchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { historySearchQuery = "" },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = VaultTextSecondary, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (filteredHistory.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.History, contentDescription = null, tint = VaultTextSecondary.copy(alpha = 0.5f), modifier = Modifier.size(40.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = if (historySearchQuery.isEmpty()) "No browsing history yet" else "No matching history found",
+                                    color = VaultTextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(280.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(filteredHistory, key = { it.id }) { item ->
+                                val dateFormat = remember { SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()) }
+                                val formattedDate = remember(item.visitedAt) { dateFormat.format(Date(item.visitedAt)) }
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            navigateTo(item.url)
+                                            showHistoryDialog = false
+                                        },
+                                    colors = CardDefaults.cardColors(containerColor = VaultBackground),
+                                    border = BorderStroke(1.dp, VaultCardBorder)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = item.title,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = item.url,
+                                                color = VaultTextSecondary,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = formattedDate,
+                                                color = VaultTextSecondary.copy(alpha = 0.7f),
+                                                fontSize = 10.sp
+                                            )
+                                        }
+
+                                        IconButton(
+                                            onClick = { viewModel.deleteBrowserHistoryItem(item.id) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Delete history item",
+                                                tint = VaultTextSecondary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (browserHistory.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Button(
+                            onClick = { showClearAllHistoryConfirm = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.15f)),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+                            shape = cornerStyle.buttonShape,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Clear All Browsing History", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showClearAllHistoryConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearAllHistoryConfirm = false },
+                title = { Text("Clear All History?", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = { Text("This will permanently delete all browsing history entries.", color = VaultTextSecondary, fontSize = 14.sp) },
+                shape = cornerStyle.dialogShape,
+                containerColor = VaultCardBackground,
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.clearBrowserHistory()
+                            showClearAllHistoryConfirm = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                        shape = cornerStyle.buttonShape
+                    ) {
+                        Text("Clear All", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearAllHistoryConfirm = false }) {
+                        Text("Cancel", color = Color(0xFFA0A0A0))
+                    }
+                }
+            )
+        }
+    }
+
+    // Granular Clear Browsing Data Dialog
+    if (showClearDataDialog) {
+        var clearHistoryChecked by remember { mutableStateOf(true) }
+        var clearCookiesChecked by remember { mutableStateOf(true) }
+        var clearCacheChecked by remember { mutableStateOf(true) }
+
         AlertDialog(
-            onDismissRequest = { showClearDataConfirm = false },
+            onDismissRequest = { showClearDataDialog = false },
             title = {
                 Text(
-                    text = "Clear All Browser Data?",
+                    text = "Clear Browsing Data",
                     color = Color.White,
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
-                Text(
-                    text = "This will delete all cookies, web storage, browser cache, and browsing history permanently.",
-                    color = VaultTextSecondary,
-                    fontSize = 14.sp
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Select data types to delete permanently:",
+                        color = VaultTextSecondary,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { clearHistoryChecked = !clearHistoryChecked }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Checkbox(
+                            checked = clearHistoryChecked,
+                            onCheckedChange = { clearHistoryChecked = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colorScheme.primary,
+                                checkmarkColor = Color.White
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Browsing History", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text("Clears persistent visited page records", color = VaultTextSecondary, fontSize = 11.sp)
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { clearCookiesChecked = !clearCookiesChecked }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Checkbox(
+                            checked = clearCookiesChecked,
+                            onCheckedChange = { clearCookiesChecked = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colorScheme.primary,
+                                checkmarkColor = Color.White
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Cookies & Site Data", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text("Signs you out of web accounts", color = VaultTextSecondary, fontSize = 11.sp)
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { clearCacheChecked = !clearCacheChecked }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Checkbox(
+                            checked = clearCacheChecked,
+                            onCheckedChange = { clearCacheChecked = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colorScheme.primary,
+                                checkmarkColor = Color.White
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Cached Images & Files", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text("Frees up device storage space", color = VaultTextSecondary, fontSize = 11.sp)
+                        }
+                    }
+                }
             },
             shape = cornerStyle.dialogShape,
             containerColor = VaultCardBackground,
             confirmButton = {
                 Button(
                     onClick = {
-                        browserSessionManager.clearAllData {
-                            inputUrl = ""
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Browser cache & history cleared")
-                            }
-                        }
-                        showClearDataConfirm = false
+                        viewModel.clearSelectedBrowserData(
+                            clearHistory = clearHistoryChecked,
+                            clearCookies = clearCookiesChecked,
+                            clearCache = clearCacheChecked
+                        )
+                        showClearDataDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = cornerStyle.buttonShape,
                     modifier = Modifier.testTag("confirm_clear_browser_data_button")
                 ) {
-                    Text("Clear All Data", color = Color.White)
+                    Text("Clear Selected", color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(
-                    onClick = { showClearDataConfirm = false },
+                    onClick = { showClearDataDialog = false },
                     shape = cornerStyle.buttonShape
                 ) {
                     Text("Cancel", color = Color(0xFFA0A0A0))
+                }
+            }
+        )
+    }
+
+    // SSL / Security Status Dialog
+    if (showSslDialog) {
+        val isHttps = activeTab.isSecureConnection
+        val host = activeTab.sslHost ?: "Current Website"
+
+        AlertDialog(
+            onDismissRequest = { showSslDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (isHttps) Icons.Default.Lock else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (isHttps) Color(0xFF10B981) else Color(0xFFF59E0B),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isHttps) "Connection is secure" else "Connection not secure",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = host,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (isHttps)
+                            "Your information (for example, passwords or credit card numbers) is private and encrypted when it is sent to this site."
+                        else
+                            "You should not enter any sensitive information on this site (for example, passwords or credit cards), because it could be intercepted by attackers.",
+                        color = VaultTextSecondary,
+                        fontSize = 13.sp
+                    )
+                    if (activeTab.isIncognito) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Color(0xFFA855F7), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Incognito mode active: Browsing history will not be saved.", color = Color(0xFFA855F7), fontSize = 11.5.sp)
+                        }
+                    }
+                }
+            },
+            shape = cornerStyle.dialogShape,
+            containerColor = VaultCardBackground,
+            confirmButton = {
+                TextButton(onClick = { showSslDialog = false }) {
+                    Text("OK", color = MaterialTheme.colorScheme.primary)
                 }
             }
         )

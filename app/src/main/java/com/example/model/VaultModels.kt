@@ -60,3 +60,12 @@ data class VaultDownload(
     val resolution: String = "1080p Full HD",
     val createdAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "browser_history")
+data class BrowserHistoryItem(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val url: String,
+    val title: String,
+    val visitedAt: Long = System.currentTimeMillis()
+)

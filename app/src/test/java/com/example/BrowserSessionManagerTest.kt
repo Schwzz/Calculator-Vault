@@ -33,6 +33,7 @@ class BrowserSessionManagerTest {
         val activeTab = sessionManager.activeTab
         assertEquals("New Tab", activeTab.title)
         assertEquals("", activeTab.url)
+        assertFalse(activeTab.isIncognito)
         assertFalse(activeTab.canGoBack)
         assertFalse(activeTab.canGoForward)
         assertFalse(activeTab.hasError)
@@ -50,6 +51,7 @@ class BrowserSessionManagerTest {
         assertEquals(1, sessionManager.activeTabIndex)
         assertEquals(secondTab.id, sessionManager.activeTab.id)
         assertEquals("https://www.google.com", sessionManager.activeTab.url)
+        assertFalse(sessionManager.activeTab.isIncognito)
 
         // Switch back to first tab
         sessionManager.selectTab(0)
@@ -57,6 +59,15 @@ class BrowserSessionManagerTest {
         assertEquals("https://www.youtube.com", sessionManager.activeTab.url)
         assertEquals("YouTube", sessionManager.activeTab.title)
         assertTrue(sessionManager.activeTab.canGoBack)
+    }
+
+    @Test
+    fun `opening an incognito tab marks tab as private`() {
+        val incognitoTab = sessionManager.openNewTab(isIncognito = true)
+        assertEquals(2, sessionManager.tabs.size)
+        assertEquals(1, sessionManager.activeTabIndex)
+        assertTrue(incognitoTab.isIncognito)
+        assertEquals("Incognito Tab", incognitoTab.title)
     }
 
     @Test
@@ -77,6 +88,18 @@ class BrowserSessionManagerTest {
         assertEquals(1, sessionManager.tabs.size)
         assertEquals(0, sessionManager.activeTabIndex)
         assertNotNull(sessionManager.activeTab)
+    }
+
+    @Test
+    fun `closeAllTabs resets to single clean tab`() {
+        sessionManager.openNewTab("https://site1.com")
+        sessionManager.openNewTab("https://site2.com")
+        assertEquals(3, sessionManager.tabs.size)
+
+        sessionManager.closeAllTabs()
+        assertEquals(1, sessionManager.tabs.size)
+        assertEquals(0, sessionManager.activeTabIndex)
+        assertEquals("", sessionManager.activeTab.url)
     }
 
     @Test

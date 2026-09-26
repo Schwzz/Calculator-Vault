@@ -5,10 +5,13 @@ import android.app.Application
 import android.content.Context
 import android.content.MutableContextWrapper
 import android.graphics.Bitmap
+import android.net.Uri
+import android.net.http.SslError
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -29,16 +32,21 @@ class BrowserTab(
     val id: String = UUID.randomUUID().toString(),
     initialTitle: String = "New Tab",
     initialUrl: String = "",
-    initialFavicon: Bitmap? = null
+    initialFavicon: Bitmap? = null,
+    val isIncognito: Boolean = false
 ) {
     var title by mutableStateOf(initialTitle)
     var url by mutableStateOf(initialUrl)
     var favicon by mutableStateOf<Bitmap?>(initialFavicon)
     var canGoBack by mutableStateOf(false)
     var canGoForward by mutableStateOf(false)
+    var isLoading by mutableStateOf(false)
     var pageProgress by mutableFloatStateOf(1f)
     var hasError by mutableStateOf(false)
     var errorMessage by mutableStateOf<String?>(null)
+    var isDesktopSite by mutableStateOf(false)
+    var isSecureConnection by mutableStateOf(false)
+    var sslHost by mutableStateOf<String?>(null)
     var detectedVideoUrl by mutableStateOf<String?>(null)
     var detectedVideoTitle by mutableStateOf("Web Video")
     var customVideoView by mutableStateOf<View?>(null)
@@ -46,16 +54,25 @@ class BrowserTab(
 }
 
 /**
- * Manages the incognito/private browser session, tabs, and leak-free WebView lifecycle
- * across configuration changes and navigation within the Calculator Vault.
+ * Manages normal & incognito browser sessions, tabs, and leak-free WebView lifecycle
+ * across navigation within Calculator Vault.
  */
 class BrowserSessionManager(private val application: Application) {
+
+    companion object {
+        const val MOBILE_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+        const val DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    }
 
     private val contextWrapper = MutableContextWrapper(application.applicationContext)
     private val webViews = mutableMapOf<String, WebView>()
 
     val tabs = mutableStateListOf(BrowserTab())
     var activeTabIndex by mutableIntStateOf(0)
+
+    var onPageVisited: ((url: String, title: String, isIncognito: Boolean) -> Unit)? = null
 
     val activeTab: BrowserTab
         get() = tabs.getOrElse(activeTabIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))) {
@@ -74,10 +91,11 @@ class BrowserSessionManager(private val application: Application) {
         }
     }
 
-    fun openNewTab(url: String = ""): BrowserTab {
+    fun openNewTab(url: String = "", isIncognito: Boolean = false): BrowserTab {
         val newTab = BrowserTab(
-            initialTitle = if (url.isEmpty()) "New Tab" else "Loading...",
-            initialUrl = url
+            initialTitle = if (url.isEmpty()) if (isIncognito) "Incognito Tab" else "New Tab" else "Loading...",
+            initialUrl = url,
+            isIncognito = isIncognito
         )
         tabs.add(newTab)
         activeTabIndex = tabs.lastIndex
@@ -95,6 +113,10 @@ class BrowserSessionManager(private val application: Application) {
                 (wv.parent as? ViewGroup)?.removeView(wv)
                 wv.stopLoading()
                 wv.clearHistory()
+                if (tabToClose.isIncognito) {
+                    wv.clearCache(true)
+                    wv.clearFormData()
+                }
                 wv.destroy()
             } catch (_: Exception) {}
         }
@@ -112,6 +134,28 @@ class BrowserSessionManager(private val application: Application) {
         }
     }
 
+    fun closeAllTabs() {
+        webViews.values.forEach { wv ->
+            try {
+                (wv.parent as? ViewGroup)?.removeView(wv)
+                wv.stopLoading()
+                wv.clearHistory()
+                wv.destroy()
+            } catch (_: Exception) {}
+        }
+        webViews.clear()
+        tabs.clear()
+        tabs.add(BrowserTab())
+        activeTabIndex = 0
+    }
+
+    fun toggleDesktopSite(tab: BrowserTab) {
+        tab.isDesktopSite = !tab.isDesktopSite
+        val wv = webViews[tab.id] ?: return
+        wv.settings.userAgentString = if (tab.isDesktopSite) DESKTOP_USER_AGENT else MOBILE_USER_AGENT
+        wv.reload()
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     fun getOrCreateWebView(tab: BrowserTab, context: Context): WebView {
         contextWrapper.baseContext = context
@@ -123,7 +167,10 @@ class BrowserSessionManager(private val application: Application) {
         }
 
         val wv = WebView(contextWrapper).apply {
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            // Setup Cookies
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.setAcceptCookie(true)
+            cookieManager.setAcceptThirdPartyCookies(this, true)
 
             settings.apply {
                 javaScriptEnabled = true
@@ -140,8 +187,8 @@ class BrowserSessionManager(private val application: Application) {
                 builtInZoomControls = true
                 displayZoomControls = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                cacheMode = WebSettings.LOAD_DEFAULT
+                userAgentString = if (tab.isDesktopSite) DESKTOP_USER_AGENT else MOBILE_USER_AGENT
+                cacheMode = if (tab.isIncognito) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
             }
 
             webViewClient = object : WebViewClient() {
@@ -151,10 +198,21 @@ class BrowserSessionManager(private val application: Application) {
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    tab.isLoading = true
                     tab.hasError = false
                     tab.errorMessage = null
                     if (!url.isNullOrEmpty() && url != "about:blank") {
                         tab.url = url
+                        val isHttps = url.startsWith("https://", ignoreCase = true)
+                        tab.isSecureConnection = isHttps
+                        tab.sslHost = try {
+                            Uri.parse(url).host
+                        } catch (_: Exception) {
+                            null
+                        }
+                    } else {
+                        tab.isSecureConnection = false
+                        tab.sslHost = null
                     }
                     if (favicon != null) {
                         tab.favicon = favicon
@@ -169,6 +227,13 @@ class BrowserSessionManager(private val application: Application) {
                     val effectiveUrl = url ?: view?.url ?: ""
                     if (effectiveUrl.isNotEmpty() && effectiveUrl != "about:blank") {
                         tab.url = effectiveUrl
+                        val isHttps = effectiveUrl.startsWith("https://", ignoreCase = true)
+                        tab.isSecureConnection = isHttps
+                        tab.sslHost = try {
+                            Uri.parse(effectiveUrl).host
+                        } catch (_: Exception) {
+                            null
+                        }
                     }
                     tab.canGoBack = view?.canGoBack() ?: false
                     tab.canGoForward = view?.canGoForward() ?: false
@@ -186,12 +251,25 @@ class BrowserSessionManager(private val application: Application) {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    tab.isLoading = false
                     tab.pageProgress = 1f
                     tab.canGoBack = view?.canGoBack() ?: false
                     tab.canGoForward = view?.canGoForward() ?: false
                     val pageTitle = view?.title
                     if (!pageTitle.isNullOrBlank() && !pageTitle.startsWith("http")) {
                         tab.title = pageTitle
+                    }
+
+                    // Flush cookies to persistent disk storage for regular browsing sessions
+                    if (!tab.isIncognito) {
+                        CookieManager.getInstance().flush()
+                    }
+
+                    // Record to persistent history (only for regular browsing, never incognito)
+                    val finishedUrl = url ?: view?.url ?: ""
+                    if (finishedUrl.isNotEmpty() && finishedUrl != "about:blank") {
+                        val titleToRecord = if (!pageTitle.isNullOrBlank() && !pageTitle.startsWith("http")) pageTitle else finishedUrl
+                        onPageVisited?.invoke(finishedUrl, titleToRecord, tab.isIncognito)
                     }
 
                     // Automatic video detection script (preserves downloader sniffer)
@@ -220,6 +298,11 @@ class BrowserSessionManager(private val application: Application) {
                     }
                 }
 
+                override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                    tab.isSecureConnection = false
+                    super.onReceivedSslError(view, handler, error)
+                }
+
                 override fun shouldInterceptRequest(
                     view: WebView?,
                     request: WebResourceRequest?
@@ -238,6 +321,7 @@ class BrowserSessionManager(private val application: Application) {
                 ) {
                     super.onReceivedError(view, request, error)
                     if (request?.isForMainFrame == true) {
+                        tab.isLoading = false
                         val description = error?.description?.toString() ?: "Unable to connect"
                         tab.hasError = true
                         tab.errorMessage = when (error?.errorCode) {
@@ -256,6 +340,9 @@ class BrowserSessionManager(private val application: Application) {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                     super.onProgressChanged(view, newProgress)
                     tab.pageProgress = newProgress / 100f
+                    if (newProgress >= 100) {
+                        tab.isLoading = false
+                    }
                 }
 
                 override fun onReceivedTitle(view: WebView?, title: String?) {
@@ -300,7 +387,6 @@ class BrowserSessionManager(private val application: Application) {
                 (wv.parent as? ViewGroup)?.removeView(wv)
             } catch (_: Exception) {}
         }
-        // Switch context to applicationContext to avoid leaking any Activity context
         contextWrapper.baseContext = application.applicationContext
     }
 
@@ -310,6 +396,43 @@ class BrowserSessionManager(private val application: Application) {
 
     fun resumeActiveWebView() {
         webViews[activeTab.id]?.onResume()
+    }
+
+    fun clearCookiesOnly(onComplete: () -> Unit = {}) {
+        try {
+            CookieManager.getInstance().removeAllCookies {
+                CookieManager.getInstance().flush()
+                onComplete()
+            }
+        } catch (_: Exception) {
+            onComplete()
+        }
+    }
+
+    fun clearCacheOnly(onComplete: () -> Unit = {}) {
+        try {
+            webViews.values.forEach { wv ->
+                wv.clearCache(true)
+            }
+        } catch (_: Exception) {}
+        onComplete()
+    }
+
+    fun clearSelectedData(clearCookies: Boolean, clearCache: Boolean, onComplete: () -> Unit = {}) {
+        if (clearCache) {
+            try {
+                webViews.values.forEach { it.clearCache(true) }
+                WebStorage.getInstance().deleteAllData()
+            } catch (_: Exception) {}
+        }
+
+        if (clearCookies) {
+            clearCookiesOnly {
+                onComplete()
+            }
+        } else {
+            onComplete()
+        }
     }
 
     fun clearAllData(onComplete: () -> Unit = {}) {
