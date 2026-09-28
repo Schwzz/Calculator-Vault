@@ -3,6 +3,7 @@ package com.example.ui.vault
 import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.content.MutableContextWrapper
 import android.graphics.Bitmap
 import android.net.Uri
@@ -162,7 +163,6 @@ class BrowserSessionManager(private val application: Application) {
 
         val existing = webViews[tab.id]
         if (existing != null) {
-            (existing.parent as? ViewGroup)?.removeView(existing)
             return existing
         }
 
@@ -193,6 +193,20 @@ class BrowserSessionManager(private val application: Application) {
 
             webViewClient = object : WebViewClient() {
                 override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                    return true
+                }
+
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val reqUrl = request?.url?.toString() ?: return false
+                    if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://") || reqUrl.startsWith("data:") || reqUrl.startsWith("blob:") || reqUrl.startsWith("about:")) {
+                        return false
+                    }
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(reqUrl)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        contextWrapper.startActivity(intent)
+                    } catch (_: Exception) {}
                     return true
                 }
 
