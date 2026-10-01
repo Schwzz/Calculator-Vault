@@ -16,6 +16,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -95,6 +97,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -104,9 +107,11 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -146,24 +151,6 @@ val RESOLUTION_OPTIONS = listOf(
     ResolutionOption("MP3 Audio Only", "Audio (320kbps)", "4.1 MB", 4_100_000L, isAudio = true)
 )
 
-data class QuickShortcut(
-    val title: String,
-    val url: String,
-    val initial: String,
-    val color: Color
-)
-
-val QUICK_SHORTCUTS = listOf(
-    QuickShortcut("Google", "https://www.google.com", "G", Color(0xFF4285F4)),
-    QuickShortcut("YouTube", "https://www.youtube.com", "Y", Color(0xFFFF0000)),
-    QuickShortcut("Wikipedia", "https://www.wikipedia.org", "W", Color(0xFF9E9E9E)),
-    QuickShortcut("Reddit", "https://www.reddit.com", "R", Color(0xFFFF4500)),
-    QuickShortcut("DuckDuckGo", "https://duckduckgo.com", "D", Color(0xFFDE5833)),
-    QuickShortcut("GitHub", "https://github.com", "G", Color(0xFF6E5494)),
-    QuickShortcut("BBC News", "https://www.bbc.com/news", "B", Color(0xFFBB1919)),
-    QuickShortcut("X / Twitter", "https://twitter.com", "X", Color(0xFF1DA1F2))
-)
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun VaultBrowserScreen(
@@ -180,8 +167,14 @@ fun VaultBrowserScreen(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
 
-    var inputUrl by remember(activeTab.id) { mutableStateOf(activeTab.url) }
+    var inputUrl by remember(activeTab.id) {
+        mutableStateOf(activeTab.url)
+    }
     var isInputFocused by remember { mutableStateOf(false) }
+
+    fun setInputUrl(newUrl: String) {
+        inputUrl = newUrl
+    }
 
     var showMenu by remember { mutableStateOf(false) }
     var showTabSwitcher by remember { mutableStateOf(false) }
@@ -202,9 +195,9 @@ fun VaultBrowserScreen(
         if (trimmed.isEmpty()) return
 
         val searchPrefix = when (vaultUiState.searchEngine.lowercase()) {
-            "duckduckgo" -> "https://duckduckgo.com/?q="
+            "google" -> "https://www.google.com/search?q="
             "brave" -> "https://search.brave.com/search?q="
-            else -> "https://www.google.com/search?q="
+            else -> "https://duckduckgo.com/?q="
         }
 
         val targetUrl = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
@@ -215,17 +208,14 @@ fun VaultBrowserScreen(
             "$searchPrefix${java.net.URLEncoder.encode(trimmed, "UTF-8")}"
         }
         activeTab.url = targetUrl
-        inputUrl = targetUrl
+        setInputUrl(targetUrl)
         activeTab.hasError = false
         activeTab.errorMessage = null
         keyboardController?.hide()
-        focusManager.clearFocus()
 
         val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
         browserSessionManager.resumeActiveWebView()
         wv.loadUrl(targetUrl)
-        wv.requestFocus()
-        wv.invalidate()
     }
 
     if (showTabSwitcher) {
@@ -235,21 +225,21 @@ fun VaultBrowserScreen(
             onClose = { showTabSwitcher = false },
             onSelectTab = { index ->
                 browserSessionManager.selectTab(index)
-                inputUrl = browserSessionManager.activeTab.url
+                setInputUrl(browserSessionManager.activeTab.url)
                 showTabSwitcher = false
             },
             onNewTab = { isIncognito ->
                 browserSessionManager.openNewTab(isIncognito = isIncognito)
-                inputUrl = ""
+                setInputUrl("")
                 showTabSwitcher = false
             },
             onCloseTab = { index ->
                 browserSessionManager.closeTab(index)
-                inputUrl = browserSessionManager.activeTab.url
+                setInputUrl(browserSessionManager.activeTab.url)
             },
             onCloseAllTabs = {
                 browserSessionManager.closeAllTabs()
-                inputUrl = ""
+                setInputUrl("")
             }
         )
         return
@@ -271,9 +261,9 @@ fun VaultBrowserScreen(
     }
 
     // Synchronize address bar input text with active tab URL when not actively typed into
-    LaunchedEffect(activeTab.url, isInputFocused) {
+    LaunchedEffect(activeTab.url) {
         if (!isInputFocused) {
-            inputUrl = activeTab.url
+            setInputUrl(activeTab.url)
         }
     }
 
@@ -310,18 +300,19 @@ fun VaultBrowserScreen(
         activeTab.errorMessage = null
         activeTab.canGoBack = false
         activeTab.canGoForward = false
-        inputUrl = ""
+        setInputUrl("")
         keyboardController?.hide()
-        focusManager.clearFocus()
-        val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
-        wv.loadUrl("about:blank")
     }
 
     fun reloadCurrentPage() {
         activeTab.hasError = false
         activeTab.errorMessage = null
-        val wv = browserSessionManager.getOrCreateWebView(activeTab, context)
-        wv.reload()
+        val wv = browserSessionManager.recreateTabWebView(activeTab, context)
+        if (activeTab.url.isNotEmpty()) {
+            wv.loadUrl(activeTab.url)
+        } else {
+            wv.reload()
+        }
     }
 
     fun stopLoadingPage() {
@@ -386,6 +377,7 @@ fun VaultBrowserScreen(
                                 onClick = onNavigateBack,
                                 modifier = Modifier
                                     .size(38.dp)
+                                    .focusProperties { canFocus = false }
                                     .testTag("browser_back_to_vault_button")
                             ) {
                                 Icon(
@@ -497,7 +489,7 @@ fun VaultBrowserScreen(
                                     // Right Action inside Omnibox: Clear, Stop, or Reload
                                     if (isInputFocused && inputUrl.isNotEmpty()) {
                                         IconButton(
-                                            onClick = { inputUrl = "" },
+                                            onClick = { setInputUrl("") },
                                             modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
@@ -552,6 +544,7 @@ fun VaultBrowserScreen(
                                         color = if (activeTab.isIncognito) Color(0xFFA855F7) else Color.White.copy(alpha = 0.8f),
                                         shape = RoundedCornerShape(8.dp)
                                     )
+                                    .focusProperties { canFocus = false }
                                     .clickable { showTabSwitcher = true }
                                     .testTag("browser_tab_switcher_button"),
                                 contentAlignment = Alignment.Center
@@ -572,6 +565,7 @@ fun VaultBrowserScreen(
                                     onClick = { showMenu = true },
                                     modifier = Modifier
                                         .size(38.dp)
+                                        .focusProperties { canFocus = false }
                                         .testTag("browser_menu_button")
                                 ) {
                                     Icon(
@@ -597,7 +591,7 @@ fun VaultBrowserScreen(
                                         onClick = {
                                             showMenu = false
                                             browserSessionManager.openNewTab()
-                                            inputUrl = ""
+                                            setInputUrl("")
                                         }
                                     )
 
@@ -609,7 +603,7 @@ fun VaultBrowserScreen(
                                         onClick = {
                                             showMenu = false
                                             browserSessionManager.openNewTab(isIncognito = true)
-                                            inputUrl = ""
+                                            setInputUrl("")
                                         }
                                     )
 
@@ -783,9 +777,10 @@ fun VaultBrowserScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .focusable()
         ) {
             // Live WebView Viewport
-            key(activeTab.id) {
+            key(activeTab.id, activeTab.webViewVersion) {
                 AndroidView(
                     factory = { ctx ->
                         val wv = browserSessionManager.getOrCreateWebView(activeTab, ctx)
@@ -794,7 +789,7 @@ fun VaultBrowserScreen(
                         wv
                     },
                     update = {
-                        browserSessionManager.resumeActiveWebView()
+                        // WebViews are resumed through lifecycle observer and tab switching
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -873,226 +868,161 @@ fun VaultBrowserScreen(
                 }
             }
 
-            // Real Browser Start Page (Displayed when active tab URL is empty)
+            // Minimal Clean Browser Start Page (Displayed when active tab URL is empty)
             if (activeTab.url.isEmpty()) {
-                LazyColumn(
+                var startScreenQuery by remember { mutableStateOf("") }
+                var currentTimeString by remember { mutableStateOf("") }
+                var currentDateString by remember { mutableStateOf("") }
+
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        val now = Date()
+                        currentTimeString = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
+                        currentDateString = SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(now)
+                        kotlinx.coroutines.delay(1000L)
+                    }
+                }
+
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(VaultBackground)
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .navigationBarsPadding(),
+                    contentAlignment = Alignment.TopCenter
                 ) {
-                    item {
-                        Spacer(modifier = Modifier.height(20.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 520.dp)
+                            .padding(horizontal = 24.dp, vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Spacer(modifier = Modifier.height(48.dp))
 
-                        Box(
-                            modifier = Modifier
-                                .size(76.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (activeTab.isIncognito) Color(0xFFA855F7).copy(alpha = 0.15f)
-                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = if (activeTab.isIncognito) Color(0xFFA855F7).copy(alpha = 0.4f)
-                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (activeTab.isIncognito) Icons.Default.VisibilityOff else Icons.Default.Security,
-                                contentDescription = null,
-                                tint = if (activeTab.isIncognito) Color(0xFFA855F7) else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(38.dp)
-                            )
+                        // Optional incognito status badge
+                        if (activeTab.isIncognito) {
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = Color(0xFFA855F7).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, Color(0xFFA855F7).copy(alpha = 0.35f)),
+                                modifier = Modifier.padding(bottom = 20.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.VisibilityOff,
+                                        contentDescription = null,
+                                        tint = Color(0xFFA855F7),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Incognito Mode",
+                                        color = Color(0xFFA855F7),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
-
+                        // Large Clean Clock
                         Text(
-                            text = if (activeTab.isIncognito) "Incognito Private Tab" else "Vault Browser",
+                            text = if (currentTimeString.isNotEmpty()) currentTimeString else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()),
                             color = VaultTextPrimary,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 62.sp,
+                            fontWeight = FontWeight.Light,
+                            letterSpacing = (-1).sp
                         )
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
+                        // Current Date
                         Text(
-                            text = if (activeTab.isIncognito)
-                                "Browsing history is not saved in this tab. Cookies & session data are discarded when closed."
-                            else
-                                "Fast, private browsing with integrated video sniffer and web storage",
+                            text = if (currentDateString.isNotEmpty()) currentDateString else SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(Date()),
                             color = VaultTextSecondary,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 16.dp)
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Normal
                         )
 
-                        Spacer(modifier = Modifier.height(28.dp))
+                        Spacer(modifier = Modifier.height(36.dp))
 
-                        // Quick Shortcuts Grid
-                        Text(
-                            text = "Top Sites",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
+                        // Clean Minimal Search / Address Bar
+                        Surface(
+                            shape = cornerStyle.cardShape,
+                            color = VaultCardBackground,
+                            border = BorderStroke(1.dp, VaultCardBorder),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 12.dp)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .height(52.dp)
                         ) {
-                            QUICK_SHORTCUTS.take(4).forEach { shortcut ->
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { navigateTo(shortcut.url) }
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(VaultCardBackground)
-                                            .border(1.dp, VaultCardBorder, RoundedCornerShape(14.dp)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = shortcut.initial,
-                                            color = shortcut.color,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = shortcut.title,
-                                        color = VaultTextSecondary,
-                                        fontSize = 11.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            QUICK_SHORTCUTS.drop(4).take(4).forEach { shortcut ->
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { navigateTo(shortcut.url) }
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(VaultCardBackground)
-                                            .border(1.dp, VaultCardBorder, RoundedCornerShape(14.dp)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = shortcut.initial,
-                                            color = shortcut.color,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = shortcut.title,
-                                        color = VaultTextSecondary,
-                                        fontSize = 11.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-
-                        // Recent History Section (Only shown in regular browsing mode)
-                        if (!activeTab.isIncognito && browserHistory.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(28.dp))
-
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Recent History",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                TextButton(onClick = { showHistoryDialog = true }) {
-                                    Text("See all", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
-                                }
-                            }
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
 
-                            browserHistory.take(4).forEach { historyItem ->
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .clickable { navigateTo(historyItem.url) },
-                                    colors = CardDefaults.cardColors(containerColor = VaultCardBackground),
-                                    border = BorderStroke(1.dp, VaultCardBorder)
+                                Box(
+                                    modifier = Modifier.weight(1f),
+                                    contentAlignment = Alignment.CenterStart
                                 ) {
-                                    Row(
+                                    if (startScreenQuery.isEmpty()) {
+                                        Text(
+                                            text = if (activeTab.isIncognito) "Search DuckDuckGo or enter address" else "Search DuckDuckGo or enter address",
+                                            color = VaultTextSecondary,
+                                            fontSize = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    BasicTextField(
+                                        value = startScreenQuery,
+                                        onValueChange = { startScreenQuery = it },
+                                        singleLine = true,
+                                        maxLines = 1,
+                                        textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                        keyboardActions = KeyboardActions(
+                                            onSearch = { navigateTo(startScreenQuery) },
+                                            onGo = { navigateTo(startScreenQuery) }
+                                        ),
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .testTag("browser_start_search_input")
+                                    )
+                                }
+
+                                if (startScreenQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { startScreenQuery = "" },
+                                        modifier = Modifier.size(24.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.History,
-                                            contentDescription = null,
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear",
                                             tint = VaultTextSecondary,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = historyItem.title,
-                                                color = Color.White,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = historyItem.url,
-                                                color = VaultTextSecondary,
-                                                fontSize = 11.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
                                     }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(30.dp))
+                        // Clean empty foundation (background area ready for wallpaper integration)
+                        Spacer(modifier = Modifier.weight(1f, fill = false))
+                        Spacer(modifier = Modifier.height(60.dp))
                     }
                 }
             }

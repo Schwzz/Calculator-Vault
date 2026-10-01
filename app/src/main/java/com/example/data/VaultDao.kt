@@ -122,8 +122,20 @@ interface VaultDao {
     @Query("SELECT * FROM browser_history ORDER BY visitedAt DESC")
     fun getAllHistory(): Flow<List<BrowserHistoryItem>>
 
+    @Query("SELECT * FROM browser_history ORDER BY visitedAt DESC LIMIT :limit")
+    suspend fun getRecentHistoryItems(limit: Int = 20): List<BrowserHistoryItem>
+
+    @Query("SELECT * FROM browser_history ORDER BY visitedAt DESC LIMIT 1")
+    suspend fun getLatestHistoryItem(): BrowserHistoryItem?
+
+    @Query("SELECT * FROM browser_history WHERE url = :url ORDER BY visitedAt DESC LIMIT 1")
+    suspend fun getLatestHistoryItemForUrl(url: String): BrowserHistoryItem?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHistory(item: BrowserHistoryItem): Long
+
+    @Update
+    suspend fun updateHistoryItem(item: BrowserHistoryItem)
 
     @Query("DELETE FROM browser_history WHERE id = :id")
     suspend fun deleteHistoryItem(id: Long)

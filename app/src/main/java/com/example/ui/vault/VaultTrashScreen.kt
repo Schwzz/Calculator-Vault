@@ -870,8 +870,9 @@ fun TrashMediaPreviewDialog(
                 if (player.isPlaying) {
                     player.pause()
                 }
+                player.reset()
+                player.release()
             } catch (_: Exception) {}
-            player.release()
             mediaPlayer = null
         }
     }

@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlinx.coroutines.async
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -118,5 +119,83 @@ class BrowserSessionManagerTest {
         assertEquals(0, sessionManager.activeTabIndex)
         assertEquals("", sessionManager.activeTab.url)
         assertEquals("New Tab", sessionManager.activeTab.title)
+    }
+
+    @Test
+    fun `default search engine is DuckDuckGo`() {
+        val prefs = com.example.data.VaultPreferences(app)
+        assertEquals("DuckDuckGo", prefs.searchEngine)
+        val searchUrl = prefs.getSearchUrl("cats")
+        assertTrue(searchUrl.contains("duckduckgo.com/?q=cats"))
+    }
+
+    @Test
+    fun `history deduplication ensures single entry for search queries and redirects`() = kotlinx.coroutines.runBlocking {
+        val db = com.example.data.VaultDatabase.getDatabase(app)
+        val prefs = com.example.data.VaultPreferences(app)
+        val repository = com.example.data.VaultRepository(db.vaultDao(), prefs)
+        repository.clearAllHistory()
+
+        // 1. Search "cats": initial URL followed by redirect & title update
+        repository.recordHistory("https://duckduckgo.com/?q=cats", "https://duckduckgo.com/?q=cats")
+        repository.recordHistory("https://duckduckgo.com/?q=cats&ia=web", "cats at DuckDuckGo")
+        repository.recordHistory("https://duckduckgo.com/?q=cats&t=h_&ia=web", "cats at DuckDuckGo")
+
+        var historyList = db.vaultDao().getRecentHistoryItems(10)
+        assertEquals(1, historyList.size)
+        assertEquals("cats at DuckDuckGo", historyList[0].title)
+
+        // 2. Search "dogs"
+        repository.recordHistory("https://duckduckgo.com/?q=dogs", "https://duckduckgo.com/?q=dogs")
+        repository.recordHistory("https://duckduckgo.com/?q=dogs&ia=web", "dogs at DuckDuckGo")
+
+        historyList = db.vaultDao().getRecentHistoryItems(10)
+        assertEquals(2, historyList.size)
+        assertEquals("dogs at DuckDuckGo", historyList[0].title)
+        assertEquals("cats at DuckDuckGo", historyList[1].title)
+
+        // 3. Search "fish"
+        repository.recordHistory("https://duckduckgo.com/?q=fish", "fish at DuckDuckGo")
+
+        historyList = db.vaultDao().getRecentHistoryItems(10)
+        assertEquals(3, historyList.size)
+        assertEquals("fish at DuckDuckGo", historyList[0].title)
+
+        // 4. Visiting regular page with trailing slash and anchor deduplication
+        repository.recordHistory("https://kotlinlang.org", "Kotlin Programming Language")
+        repository.recordHistory("https://kotlinlang.org/", "Kotlin Programming Language")
+        repository.recordHistory("https://kotlinlang.org/#overview", "Kotlin Programming Language")
+
+        historyList = db.vaultDao().getRecentHistoryItems(10)
+        assertEquals(4, historyList.size)
+        assertEquals("Kotlin Programming Language", historyList[0].title)
+
+        // Clean up
+        repository.clearAllHistory()
+    }
+
+    @Test
+    fun `concurrent history recording calls are thread-safe and deduplicated`() = kotlinx.coroutines.runBlocking {
+        val db = com.example.data.VaultDatabase.getDatabase(app)
+        val prefs = com.example.data.VaultPreferences(app)
+        val repository = com.example.data.VaultRepository(db.vaultDao(), prefs)
+        repository.clearAllHistory()
+
+        // Simulate 5 concurrent coroutines recording for the same search query
+        val jobs = (1..5).map { index ->
+            async(kotlinx.coroutines.Dispatchers.Default) {
+                repository.recordHistory(
+                    "https://duckduckgo.com/?q=cats&param=$index",
+                    if (index == 5) "cats at DuckDuckGo" else "https://duckduckgo.com/?q=cats"
+                )
+            }
+        }
+        jobs.forEach { it.await() }
+
+        val historyList = db.vaultDao().getRecentHistoryItems(10)
+        assertEquals(1, historyList.size)
+        assertEquals("cats at DuckDuckGo", historyList[0].title)
+
+        repository.clearAllHistory()
     }
 }

@@ -211,11 +211,12 @@ fun VaultMediaPlayerDialog(
                     mp.pause()
                 }
                 mp.stop()
-            } catch (_: Exception) {}
-            try {
+                mp.reset()
                 mp.release()
             } catch (_: Exception) {}
-            videoSurface?.release()
+            try {
+                videoSurface?.release()
+            } catch (_: Exception) {}
             videoSurface = null
             mediaPlayer = null
         }
@@ -287,11 +288,16 @@ fun VaultMediaPlayerDialog(
 
                                 override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                                     try {
+                                        if (mediaPlayer?.isPlaying == true) {
+                                            mediaPlayer?.pause()
+                                        }
                                         mediaPlayer?.setSurface(null)
                                     } catch (e: Exception) {
                                         e.printStackTrace()
                                     }
-                                    videoSurface?.release()
+                                    try {
+                                        videoSurface?.release()
+                                    } catch (_: Exception) {}
                                     videoSurface = null
                                     return true
                                 }

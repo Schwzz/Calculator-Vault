@@ -55,6 +55,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            android.system.Os.setenv("MESA_DEBUG", "0", true)
+            android.system.Os.setenv("EGL_LOG_LEVEL", "fatal", true)
+        } catch (_: Exception) {}
         enableEdgeToEdge()
 
         setContent {

@@ -39,7 +39,7 @@ class VaultPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_BLOCK_SCREENSHOTS, value).apply()
 
     var searchEngine: String
-        get() = prefs.getString(KEY_SEARCH_ENGINE, "Google") ?: "Google"
+        get() = prefs.getString(KEY_SEARCH_ENGINE, "DuckDuckGo") ?: "DuckDuckGo"
         set(value) = prefs.edit().putString(KEY_SEARCH_ENGINE, value).apply()
 
     fun getSearchUrl(query: String): String {
@@ -49,9 +49,9 @@ class VaultPreferences(context: Context) {
             query
         }
         return when (searchEngine.lowercase()) {
-            "duckduckgo" -> "https://duckduckgo.com/?q=$encoded"
+            "google" -> "https://www.google.com/search?q=$encoded"
             "brave" -> "https://search.brave.com/search?q=$encoded"
-            else -> "https://www.google.com/search?q=$encoded"
+            else -> "https://duckduckgo.com/?q=$encoded"
         }
     }
 

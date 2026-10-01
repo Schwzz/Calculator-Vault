@@ -50,7 +50,7 @@ data class VaultUiState(
     val resetOnExit: Boolean = true,
     val hideRecentsPreview: Boolean = true,
     val blockScreenshots: Boolean = true,
-    val searchEngine: String = "Google",
+    val searchEngine: String = "DuckDuckGo",
     val cornerStyle: VaultCornerStyle = VaultCornerStyle.SOFT
 )
 

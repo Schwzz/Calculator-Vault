@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.io.File
 import java.util.UUID
 
 class BrowserTab(
@@ -52,6 +53,10 @@ class BrowserTab(
     var detectedVideoTitle by mutableStateOf("Web Video")
     var customVideoView by mutableStateOf<View?>(null)
     var customViewCallback by mutableStateOf<WebChromeClient.CustomViewCallback?>(null)
+    var webViewVersion by mutableIntStateOf(0)
+    var lastRecordedUrl: String? = null
+    var lastRecordedTitle: String? = null
+    var lastRecordTime: Long = 0L
 }
 
 /**
@@ -69,6 +74,13 @@ class BrowserSessionManager(private val application: Application) {
 
     private val contextWrapper = MutableContextWrapper(application.applicationContext)
     private val webViews = mutableMapOf<String, WebView>()
+
+    init {
+        try {
+            android.system.Os.setenv("MESA_DEBUG", "0", true)
+            android.system.Os.setenv("EGL_LOG_LEVEL", "fatal", true)
+        } catch (_: Exception) {}
+    }
 
     val tabs = mutableStateListOf(BrowserTab())
     var activeTabIndex by mutableIntStateOf(0)
@@ -88,7 +100,12 @@ class BrowserSessionManager(private val application: Application) {
 
     fun selectTab(index: Int) {
         if (index in tabs.indices) {
+            val oldTabId = activeTab.id
+            if (activeTabIndex != index) {
+                webViews[oldTabId]?.onPause()
+            }
             activeTabIndex = index
+            webViews[activeTab.id]?.onResume()
         }
     }
 
@@ -115,7 +132,6 @@ class BrowserSessionManager(private val application: Application) {
                 wv.stopLoading()
                 wv.clearHistory()
                 if (tabToClose.isIncognito) {
-                    wv.clearCache(true)
                     wv.clearFormData()
                 }
                 wv.destroy()
@@ -153,8 +169,21 @@ class BrowserSessionManager(private val application: Application) {
     fun toggleDesktopSite(tab: BrowserTab) {
         tab.isDesktopSite = !tab.isDesktopSite
         val wv = webViews[tab.id] ?: return
-        wv.settings.userAgentString = if (tab.isDesktopSite) DESKTOP_USER_AGENT else MOBILE_USER_AGENT
+        val defaultUa = WebSettings.getDefaultUserAgent(contextWrapper)
+        wv.settings.userAgentString = if (tab.isDesktopSite) DESKTOP_USER_AGENT else defaultUa
         wv.reload()
+    }
+
+    fun recreateTabWebView(tab: BrowserTab, context: Context): WebView {
+        webViews.remove(tab.id)?.let { oldWv ->
+            try {
+                (oldWv.parent as? ViewGroup)?.removeView(oldWv)
+                oldWv.stopLoading()
+                oldWv.destroy()
+            } catch (_: Exception) {}
+        }
+        tab.webViewVersion++
+        return getOrCreateWebView(tab, context)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -166,33 +195,63 @@ class BrowserSessionManager(private val application: Application) {
             return existing
         }
 
+        // Limit concurrent WebViews in memory to prevent renderer process memory pressure
+        if (webViews.size >= 4) {
+            val candidateId = webViews.keys.firstOrNull { it != tab.id && it != activeTab.id }
+            if (candidateId != null) {
+                webViews.remove(candidateId)?.let { oldWv ->
+                    try {
+                        (oldWv.parent as? ViewGroup)?.removeView(oldWv)
+                        oldWv.stopLoading()
+                        oldWv.destroy()
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
         val wv = WebView(contextWrapper).apply {
             // Setup Cookies
             val cookieManager = CookieManager.getInstance()
             cookieManager.setAcceptCookie(true)
-            cookieManager.setAcceptThirdPartyCookies(this, true)
+            cookieManager.setAcceptThirdPartyCookies(this, false)
 
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
-                databaseEnabled = true
                 allowFileAccess = false
                 allowContentAccess = false
                 allowFileAccessFromFileURLs = false
                 allowUniversalAccessFromFileURLs = false
-                mediaPlaybackRequiresUserGesture = false
+                mediaPlaybackRequiresUserGesture = true
                 useWideViewPort = true
                 loadWithOverviewMode = true
                 setSupportZoom(true)
                 builtInZoomControls = true
                 displayZoomControls = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                userAgentString = if (tab.isDesktopSite) DESKTOP_USER_AGENT else MOBILE_USER_AGENT
+                val defaultUa = WebSettings.getDefaultUserAgent(contextWrapper)
+                userAgentString = if (tab.isDesktopSite) DESKTOP_USER_AGENT else defaultUa
                 cacheMode = if (tab.isIncognito) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
             }
 
             webViewClient = object : WebViewClient() {
                 override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                    webViews.values.forEach { deadWv ->
+                        try {
+                            (deadWv.parent as? ViewGroup)?.removeView(deadWv)
+                            deadWv.destroy()
+                        } catch (_: Exception) {}
+                    }
+                    webViews.clear()
+                    tab.webViewVersion++
+                    tab.isLoading = false
+                    tab.hasError = true
+                    val didCrash = detail?.didCrash() == true
+                    tab.errorMessage = if (didCrash) {
+                        "The webpage renderer stopped unexpectedly. Tap 'Try Again' to reload."
+                    } else {
+                        "The webpage was closed by the system. Tap 'Try Again' to reload."
+                    }
                     return true
                 }
 
@@ -280,10 +339,29 @@ class BrowserSessionManager(private val application: Application) {
                     }
 
                     // Record to persistent history (only for regular browsing, never incognito)
-                    val finishedUrl = url ?: view?.url ?: ""
-                    if (finishedUrl.isNotEmpty() && finishedUrl != "about:blank") {
-                        val titleToRecord = if (!pageTitle.isNullOrBlank() && !pageTitle.startsWith("http")) pageTitle else finishedUrl
-                        onPageVisited?.invoke(finishedUrl, titleToRecord, tab.isIncognito)
+                    val finishedUrl = (url ?: view?.url ?: "").trim()
+                    if (!tab.isIncognito && finishedUrl.isNotEmpty() && finishedUrl != "about:blank" && !finishedUrl.startsWith("data:") && !finishedUrl.startsWith("javascript:")) {
+                        val titleToRecord = if (!pageTitle.isNullOrBlank() && !pageTitle.startsWith("http://") && !pageTitle.startsWith("https://")) pageTitle.trim() else finishedUrl
+                        val lastUrl = tab.lastRecordedUrl
+                        val lastTitle = tab.lastRecordedTitle
+                        val now = System.currentTimeMillis()
+                        val isExactSame = (finishedUrl.equals(lastUrl, ignoreCase = true) && titleToRecord == lastTitle)
+                        val isSameSearch = isSameSearchQuery(finishedUrl, lastUrl)
+
+                        if (!isExactSame) {
+                            val isTitleUpgrade = finishedUrl.equals(lastUrl, ignoreCase = true) &&
+                                    !titleToRecord.startsWith("http") &&
+                                    (lastTitle == null || lastTitle.startsWith("http") || lastTitle.isBlank())
+                            val isSignificantUrlChange = !finishedUrl.equals(lastUrl, ignoreCase = true) && !isSameSearch
+                            val isElapsedEnough = (now - tab.lastRecordTime >= 2000L)
+
+                            if (isSignificantUrlChange || isTitleUpgrade || (isSameSearch && isTitleUpgrade) || (isSameSearch && isElapsedEnough && titleToRecord != lastTitle)) {
+                                tab.lastRecordedUrl = finishedUrl
+                                tab.lastRecordedTitle = titleToRecord
+                                tab.lastRecordTime = now
+                                onPageVisited?.invoke(finishedUrl, titleToRecord, false)
+                            }
+                        }
                     }
 
                     // Automatic video detection script (preserves downloader sniffer)
@@ -310,6 +388,25 @@ class BrowserSessionManager(private val application: Application) {
                         tab.detectedVideoUrl = url
                         tab.detectedVideoTitle = view?.title ?: "Streaming Video"
                     }
+
+                    // Safely disable WebGL contexts to prevent GLES2 zero-count warnings and renderer memory leaks
+                    val disableWebGlJs = """
+                        (function() {
+                            try {
+                                if (window.HTMLCanvasElement && !window.__webglDisabled) {
+                                    window.__webglDisabled = true;
+                                    var origGetContext = HTMLCanvasElement.prototype.getContext;
+                                    HTMLCanvasElement.prototype.getContext = function(type) {
+                                        if (type === 'webgl' || type === 'experimental-webgl' || type === 'webgl2') {
+                                            return null;
+                                        }
+                                        return origGetContext.apply(this, arguments);
+                                    };
+                                }
+                            } catch(e) {}
+                        })();
+                    """.trimIndent()
+                    view?.evaluateJavascript(disableWebGlJs, null)
                 }
 
                 override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
@@ -394,6 +491,23 @@ class BrowserSessionManager(private val application: Application) {
         return wv
     }
 
+    private fun isSameSearchQuery(url1: String?, url2: String?): Boolean {
+        if (url1.isNullOrEmpty() || url2.isNullOrEmpty()) return false
+        return try {
+            val uri1 = Uri.parse(url1)
+            val uri2 = Uri.parse(url2)
+            val h1 = uri1.host?.removePrefix("www.")?.lowercase() ?: ""
+            val h2 = uri2.host?.removePrefix("www.")?.lowercase() ?: ""
+            if (h1.isNotEmpty() && h1 == h2 && (h1.contains("duckduckgo.com") || h1.contains("google.") || h1.contains("search.brave.com") || h1.contains("bing.com"))) {
+                val q1 = uri1.getQueryParameter("q") ?: uri1.getQueryParameter("query")
+                val q2 = uri2.getQueryParameter("q") ?: uri2.getQueryParameter("query")
+                q1 != null && q1.equals(q2, ignoreCase = true)
+            } else false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun detachWebView(tab: BrowserTab) {
         val wv = webViews[tab.id]
         if (wv != null) {
@@ -425,9 +539,7 @@ class BrowserSessionManager(private val application: Application) {
 
     fun clearCacheOnly(onComplete: () -> Unit = {}) {
         try {
-            webViews.values.forEach { wv ->
-                wv.clearCache(true)
-            }
+            webViews.values.firstOrNull()?.clearCache(true) ?: WebView(contextWrapper).clearCache(true)
         } catch (_: Exception) {}
         onComplete()
     }
@@ -435,7 +547,7 @@ class BrowserSessionManager(private val application: Application) {
     fun clearSelectedData(clearCookies: Boolean, clearCache: Boolean, onComplete: () -> Unit = {}) {
         if (clearCache) {
             try {
-                webViews.values.forEach { it.clearCache(true) }
+                webViews.values.firstOrNull()?.clearCache(true) ?: WebView(contextWrapper).clearCache(true)
                 WebStorage.getInstance().deleteAllData()
             } catch (_: Exception) {}
         }
@@ -458,13 +570,15 @@ class BrowserSessionManager(private val application: Application) {
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
 
-            // 3. Clear and destroy all active WebViews
+            // 3. Clear cache once globally
+            webViews.values.firstOrNull()?.clearCache(true) ?: WebView(contextWrapper).clearCache(true)
+
+            // 4. Clear and destroy all active WebViews
             webViews.values.forEach { wv ->
                 try {
                     (wv.parent as? ViewGroup)?.removeView(wv)
                     wv.stopLoading()
                     wv.clearHistory()
-                    wv.clearCache(true)
                     wv.clearFormData()
                     wv.clearSslPreferences()
                     wv.destroy()
@@ -472,7 +586,7 @@ class BrowserSessionManager(private val application: Application) {
             }
             webViews.clear()
 
-            // 4. Reset tabs to clean single start page
+            // 5. Reset tabs to clean single start page
             tabs.clear()
             tabs.add(BrowserTab())
             activeTabIndex = 0

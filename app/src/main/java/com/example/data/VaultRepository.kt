@@ -20,6 +20,8 @@ import com.example.model.VaultItem
 import com.example.model.VaultNote
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -758,11 +760,112 @@ class VaultRepository(
     suspend fun removeDownload(id: Long) = dao.deleteDownload(id)
 
     // Browser History
+    private val historyMutex = Mutex()
+
     suspend fun recordHistory(url: String, title: String) {
-        val cleanUrl = url.trim()
-        if (cleanUrl.isEmpty() || cleanUrl == "about:blank" || cleanUrl.startsWith("data:")) return
-        val cleanTitle = if (title.isBlank() || title.startsWith("http")) cleanUrl else title
-        dao.insertHistory(BrowserHistoryItem(url = cleanUrl, title = cleanTitle))
+        val cleanUrl = normalizeHistoryUrl(url)
+        if (cleanUrl.isEmpty() || cleanUrl == "about:blank" || cleanUrl.startsWith("data:") || cleanUrl.startsWith("javascript:")) return
+        val cleanTitle = if (title.isBlank() || title.startsWith("http://") || title.startsWith("https://")) cleanUrl else title.trim()
+        val now = System.currentTimeMillis()
+
+        withContext(Dispatchers.IO) {
+            historyMutex.withLock {
+                val recentItems = dao.getRecentHistoryItems(20)
+                val latest = recentItems.firstOrNull()
+
+                // Check 1: Same exact URL already exists in recent history
+                val existingExact = recentItems.find {
+                    normalizeHistoryUrl(it.url).equals(cleanUrl, ignoreCase = true)
+                }
+                if (existingExact != null) {
+                    val isRecentOrLatest = (now - existingExact.visitedAt < 60_000L) || (existingExact.id == latest?.id)
+                    if (isRecentOrLatest) {
+                        val betterTitle = if (isBetterTitle(cleanTitle, existingExact.title)) cleanTitle else existingExact.title
+                        dao.updateHistoryItem(existingExact.copy(title = betterTitle, visitedAt = now))
+                        return@withLock
+                    }
+                }
+
+                // Check 2: Same search engine query (e.g. duckduckgo.com/?q=cats -> duckduckgo.com/?q=cats&ia=web)
+                val newSearch = extractSearchQuery(cleanUrl)
+                if (newSearch != null) {
+                    val existingSearch = recentItems.find { item ->
+                        val itemSearch = extractSearchQuery(item.url)
+                        itemSearch != null &&
+                                itemSearch.first == newSearch.first &&
+                                itemSearch.second == newSearch.second &&
+                                (now - item.visitedAt < 120_000L || item.id == latest?.id)
+                    }
+                    if (existingSearch != null) {
+                        val betterTitle = if (isBetterTitle(cleanTitle, existingSearch.title)) cleanTitle else existingSearch.title
+                        dao.updateHistoryItem(existingSearch.copy(url = cleanUrl, title = betterTitle, visitedAt = now))
+                        return@withLock
+                    }
+                }
+
+                // Check 3: Rapid redirect chain (e.g. http to https, or redirect from domain root to subpath within 10 seconds)
+                if (latest != null && (now - latest.visitedAt < 10_000L) && newSearch == null && extractSearchQuery(latest.url) == null) {
+                    val latestUri = try { Uri.parse(latest.url) } catch (_: Exception) { null }
+                    val newUri = try { Uri.parse(cleanUrl) } catch (_: Exception) { null }
+                    val latestHost = latestUri?.host?.removePrefix("www.")?.lowercase() ?: ""
+                    val newHost = newUri?.host?.removePrefix("www.")?.lowercase() ?: ""
+                    if (latestHost.isNotEmpty() && latestHost == newHost) {
+                        val isProtocolUpgrade = latest.url.startsWith("http://") && cleanUrl.startsWith("https://")
+                        val isRootToSubpath = (latestUri?.path.isNullOrEmpty() || latestUri?.path == "/") && !newUri?.path.isNullOrEmpty()
+                        if (isProtocolUpgrade || isRootToSubpath) {
+                            val betterTitle = if (isBetterTitle(cleanTitle, latest.title)) cleanTitle else latest.title
+                            dao.updateHistoryItem(latest.copy(url = cleanUrl, title = betterTitle, visitedAt = now))
+                            return@withLock
+                        }
+                    }
+                }
+
+                // Normal new navigation: insert fresh history record
+                dao.insertHistory(BrowserHistoryItem(url = cleanUrl, title = cleanTitle, visitedAt = now))
+            }
+        }
+    }
+
+    private fun normalizeHistoryUrl(url: String): String {
+        return url.substringBefore("#").trim().removeSuffix("/")
+    }
+
+    private fun extractSearchQuery(url: String): Pair<String, String>? {
+        return try {
+            val uri = Uri.parse(url)
+            val host = uri.host?.removePrefix("www.")?.lowercase() ?: return null
+            val isSearchEngine = host.contains("duckduckgo.com") ||
+                    host.contains("google.") ||
+                    host.contains("search.brave.com") ||
+                    host.contains("bing.com") ||
+                    host.contains("yahoo.com")
+            if (!isSearchEngine) return null
+            val query = uri.getQueryParameter("q")
+                ?: uri.getQueryParameter("query")
+                ?: uri.getQueryParameter("p")
+            if (!query.isNullOrBlank()) {
+                Pair(host, query.trim().lowercase())
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun isBetterTitle(newTitle: String, oldTitle: String): Boolean {
+        val isNewRaw = newTitle.isBlank() || newTitle.startsWith("http://") || newTitle.startsWith("https://")
+        val isOldRaw = oldTitle.isBlank() || oldTitle.startsWith("http://") || oldTitle.startsWith("https://")
+        if (isNewRaw && !isOldRaw) return false
+        if (!isNewRaw && isOldRaw) return true
+        if (!isNewRaw && !isOldRaw) return newTitle.length >= oldTitle.length
+        return false
+    }
+
+    private fun isSameSearchQuery(url1: String, url2: String): Boolean {
+        val s1 = extractSearchQuery(url1) ?: return false
+        val s2 = extractSearchQuery(url2) ?: return false
+        return s1.first == s2.first && s1.second == s2.second
     }
 
     suspend fun deleteHistoryItem(id: Long) = dao.deleteHistoryItem(id)
